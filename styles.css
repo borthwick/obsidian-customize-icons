@@ -1,0 +1,195 @@
+/* Customize Icons plugin styles */
+
+/* Icon in internal links (editor + reading) */
+.customize-icons-link-icon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-right: 2px;
+  position: relative;
+  top: -1px;
+}
+
+.customize-icons-link-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.customize-icons-link-icon .ci-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Icon in file explorer */
+.nav-file-title .customize-icons-explorer-icon,
+.nav-folder-title .customize-icons-explorer-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  flex-shrink: 0;
+  position: relative;
+  top: 1px;
+}
+
+.nav-file-title .customize-icons-explorer-icon svg,
+.nav-folder-title .customize-icons-explorer-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nav-file-title .customize-icons-explorer-icon .ci-emoji,
+.nav-folder-title .customize-icons-explorer-icon .ci-emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Icon in tab bar */
+.workspace-tab-header .customize-icons-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  height: 100%;
+}
+
+.workspace-tab-header .customize-icons-tab-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.workspace-tab-header .customize-icons-tab-icon .ci-emoji {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Icon above title */
+.customize-icons-title-icon {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 4px;
+}
+
+.customize-icons-title-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.customize-icons-title-icon .ci-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* Quality score color tinting */
+.customize-icons-link-icon svg.ci-quality-exists,
+.customize-icons-explorer-icon svg.ci-quality-exists,
+.customize-icons-tab-icon svg.ci-quality-exists,
+.customize-icons-title-icon svg.ci-quality-exists {
+  /* color set via inline style */
+}
+
+.customize-icons-link-icon svg.ci-quality-high,
+.customize-icons-explorer-icon svg.ci-quality-high,
+.customize-icons-tab-icon svg.ci-quality-high,
+.customize-icons-title-icon svg.ci-quality-high {
+  /* color set via inline style */
+}
+
+/* Settings - icon picker */
+.ci-icon-picker-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.ci-icon-picker-search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.ci-icon-picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ci-icon-picker-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.ci-icon-picker-item:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border);
+}
+
+.ci-icon-picker-item.selected {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ci-icon-picker-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ci-icon-picker-item .ci-emoji {
+  font-size: 18px;
+}
+
+.ci-icon-collection-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 8px 0 4px 0;
+  text-transform: uppercase;
+}
+
+/* Settings - folder list */
+.ci-folder-assignment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ci-folder-assignment:last-child {
+  border-bottom: none;
+}
+
+.ci-folder-name {
+  flex: 1;
+  font-size: 13px;
+}
+
+.ci-folder-name.ci-subfolder {
+  padding-left: 20px;
+  color: var(--text-muted);
+}
+
+.ci-folder-icon-preview {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ci-folder-icon-preview svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ci-folder-icon-preview .ci-emoji {
+  font-size: 16px;
+}
