@@ -11,16 +11,12 @@
 }
 
 /* Bases table/list/cards: tighter spacing and no vertical offset */
-.bases-tbody .customize-icons-link-icon,
-.bases-list-container .customize-icons-link-icon,
-.bases-cards-container .customize-icons-link-icon {
+.bases-view .customize-icons-link-icon {
   margin-right: 4px;
   top: 1px;
 }
 
-.bases-tbody .customize-icons-link-icon svg,
-.bases-list-container .customize-icons-link-icon svg,
-.bases-cards-container .customize-icons-link-icon svg {
+.bases-view .customize-icons-link-icon svg {
   width: 13px;
   height: 13px;
 }

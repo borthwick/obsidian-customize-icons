@@ -357,7 +357,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.5.0 loaded");
+    new obsidian.Notice("Customize Icons v1.5.1 loaded");
   }
 
   onunload() {
@@ -525,9 +525,12 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
   decorateBases() {
     if (!this.settings.showInBases) return;
 
-    var containers = document.querySelectorAll(
-      ".bases-tbody, .bases-list-container, .bases-cards-container"
-    );
+    // Anchor on .bases-view — the top-level wrapper present in every Bases
+    // layout (table, list, cards) and every grouping mode. Earlier selectors
+    // (.bases-tbody / .bases-list-container / .bases-cards-container) miss
+    // grouped list views, which nest rows under .bases-list-group-list
+    // outside the list-container.
+    var containers = document.querySelectorAll(".bases-view");
 
     // Drop observers for containers that have left the DOM
     this._basesObservers.forEach((obs, el) => {
@@ -753,7 +756,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       // Clear ci-processed markers so stale links pick up the new icon/color
       document.querySelectorAll("a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
       // Remove and re-inject icons inside Bases (folder mapping or quality may have changed)
-      document.querySelectorAll(".bases-tbody .customize-icons-link-icon, .bases-list-container .customize-icons-link-icon, .bases-cards-container .customize-icons-link-icon").forEach(el => el.remove());
+      document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach(el => el.remove());
       this.decorateBases();
     }, 500);
   }
@@ -951,8 +954,8 @@ var CustomizeIconsSettingTab = class extends obsidian.PluginSettingTab {
             // Tear down observers and remove injected icons
             this.plugin._basesObservers.forEach(obs => obs.disconnect());
             this.plugin._basesObservers.clear();
-            document.querySelectorAll(".bases-tbody .customize-icons-link-icon, .bases-list-container .customize-icons-link-icon, .bases-cards-container .customize-icons-link-icon").forEach(el => el.remove());
-            document.querySelectorAll(".bases-tbody a.internal-link[data-ci-processed], .bases-list-container a.internal-link[data-ci-processed], .bases-cards-container a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+            document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach(el => el.remove());
+            document.querySelectorAll(".bases-view a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
           }
         }));
 
