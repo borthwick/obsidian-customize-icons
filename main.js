@@ -50,6 +50,7 @@ var DEFAULT_SETTINGS = {
   qualityHighThreshold: 7,
   showInLinks: true,
   showInEditor: true,
+  showInBases: true,
   enableConnectivityColoring: true,
   connectivityColor: "#e8a838",
   connectivityThreshold: 10,
@@ -318,21 +319,27 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       this.processReadingModeLinks(el, ctx);
     });
 
+    // Bases view observers — populated lazily as Bases views appear
+    this._basesObservers = new Map(); // container element → MutationObserver
+
     // Decorate file explorer
     this.app.workspace.onLayoutReady(() => {
       this.decorateFileExplorer();
       this.decorateOpenTabs();
+      this.decorateBases();
     });
 
     // Re-decorate on layout changes
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       this.decorateOpenTabs();
+      this.decorateBases();
     }));
 
     // Re-decorate on file open
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
       this.decorateOpenTabs();
       this.addTitleIcon(leaf);
+      this.decorateBases();
     }));
 
     // Re-decorate explorer on file create/delete/rename (debounced)
@@ -350,12 +357,19 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.4.2 loaded");
+    new obsidian.Notice("Customize Icons v1.5.0 loaded");
   }
 
   onunload() {
-    // Clean up injected icons
+    // Disconnect Bases observers
+    if (this._basesObservers) {
+      this._basesObservers.forEach(obs => obs.disconnect());
+      this._basesObservers.clear();
+    }
+    // Clean up injected icons (including those in Bases views)
     document.querySelectorAll(".customize-icons-explorer-icon, .customize-icons-tab-icon, .customize-icons-title-icon, .customize-icons-link-icon").forEach(el => el.remove());
+    // Reset the dataset marker we use to skip re-processed Bases links
+    document.querySelectorAll("a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
   }
 
   // ─── Reading Mode: Decorate internal links ───
@@ -501,6 +515,74 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       titleRowEl.insertBefore(span, titleEl);
     }
     this._decorating = false;
+  }
+
+  // ─── Bases View Decoration ───
+  // Bases (table/list/cards) lazy-render rows as you scroll, sort, or filter,
+  // so we attach a MutationObserver to each Bases container we find. The same
+  // insertLinkIcon used by reading-mode handles the actual injection — Bases
+  // file-name cells contain `a.internal-link[data-href]`, so we reuse that path.
+  decorateBases() {
+    if (!this.settings.showInBases) return;
+
+    var containers = document.querySelectorAll(
+      ".bases-tbody, .bases-list-container, .bases-cards-container"
+    );
+
+    // Drop observers for containers that have left the DOM
+    this._basesObservers.forEach((obs, el) => {
+      if (!el.isConnected) {
+        obs.disconnect();
+        this._basesObservers.delete(el);
+      }
+    });
+
+    for (var container of containers) {
+      this.processBasesAnchors(container);
+      this.setupBasesObserver(container);
+    }
+  }
+
+  processBasesAnchors(root) {
+    if (!this.settings.showInBases) return;
+    var anchors = root.querySelectorAll("a.internal-link[data-href]");
+    for (var link of anchors) {
+      // Skip if already injected or already enqueued
+      if (link.dataset.ciProcessed === "1") continue;
+      if (link.querySelector(".customize-icons-link-icon")) {
+        link.dataset.ciProcessed = "1";
+        continue;
+      }
+
+      var href = link.getAttribute("data-href");
+      if (!href) continue;
+
+      var file = this.app.metadataCache.getFirstLinkpathDest(href, "");
+      if (!file) continue;
+
+      var iconConfig = resolveIconForPath(file.path, this.settings.folderIcons);
+      if (!iconConfig) continue;
+
+      link.dataset.ciProcessed = "1";
+      this.insertLinkIcon(link, file.path, iconConfig);
+    }
+  }
+
+  setupBasesObserver(container) {
+    if (this._basesObservers.has(container)) return;
+
+    var self = this;
+    var pending = null;
+    var observer = new MutationObserver(() => {
+      // Debounce — Bases can churn the DOM dozens of times per scroll tick
+      if (pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        self.processBasesAnchors(container);
+      }, 50);
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    this._basesObservers.set(container, observer);
   }
 
   // ─── Tab Decoration ───
@@ -668,6 +750,11 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     this._explorerTimer = setTimeout(() => {
       this.decorateFileExplorer();
       this.decorateOpenTabs();
+      // Clear ci-processed markers so stale links pick up the new icon/color
+      document.querySelectorAll("a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+      // Remove and re-inject icons inside Bases (folder mapping or quality may have changed)
+      document.querySelectorAll(".bases-tbody .customize-icons-link-icon, .bases-list-container .customize-icons-link-icon, .bases-cards-container .customize-icons-link-icon").forEach(el => el.remove());
+      this.decorateBases();
     }, 500);
   }
 
@@ -848,6 +935,25 @@ var CustomizeIconsSettingTab = class extends obsidian.PluginSettingTab {
         .onChange(async (val) => {
           this.plugin.settings.showInEditor = val;
           await this.plugin.saveSettings();
+        }));
+
+    new obsidian.Setting(el)
+      .setName("Show icons in Bases views")
+      .setDesc("Display file icons next to note names in Bases tables, lists, and cards")
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.showInBases)
+        .onChange(async (val) => {
+          this.plugin.settings.showInBases = val;
+          await this.plugin.saveSettings();
+          if (val) {
+            this.plugin.decorateBases();
+          } else {
+            // Tear down observers and remove injected icons
+            this.plugin._basesObservers.forEach(obs => obs.disconnect());
+            this.plugin._basesObservers.clear();
+            document.querySelectorAll(".bases-tbody .customize-icons-link-icon, .bases-list-container .customize-icons-link-icon, .bases-cards-container .customize-icons-link-icon").forEach(el => el.remove());
+            document.querySelectorAll(".bases-tbody a.internal-link[data-ci-processed], .bases-list-container a.internal-link[data-ci-processed], .bases-cards-container a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+          }
         }));
 
     new obsidian.Setting(el)
