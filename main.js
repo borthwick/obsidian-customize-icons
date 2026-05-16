@@ -357,7 +357,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.5.1 loaded");
+    new obsidian.Notice("Customize Icons v1.5.2 loaded");
   }
 
   onunload() {
@@ -369,7 +369,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Clean up injected icons (including those in Bases views)
     document.querySelectorAll(".customize-icons-explorer-icon, .customize-icons-tab-icon, .customize-icons-title-icon, .customize-icons-link-icon").forEach(el => el.remove());
     // Reset the dataset marker we use to skip re-processed Bases links
-    document.querySelectorAll("a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+    document.querySelectorAll(".internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
   }
 
   // ─── Reading Mode: Decorate internal links ───
@@ -521,7 +521,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
   // Bases (table/list/cards) lazy-render rows as you scroll, sort, or filter,
   // so we attach a MutationObserver to each Bases container we find. The same
   // insertLinkIcon used by reading-mode handles the actual injection — Bases
-  // file-name cells contain `a.internal-link[data-href]`, so we reuse that path.
+  // file-name cells contain `.internal-link[data-href]`, so we reuse that path.
   decorateBases() {
     if (!this.settings.showInBases) return;
 
@@ -548,7 +548,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
 
   processBasesAnchors(root) {
     if (!this.settings.showInBases) return;
-    var anchors = root.querySelectorAll("a.internal-link[data-href]");
+    var anchors = root.querySelectorAll(".internal-link[data-href]");
     for (var link of anchors) {
       // Skip if already injected or already enqueued
       if (link.dataset.ciProcessed === "1") continue;
@@ -754,7 +754,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       this.decorateFileExplorer();
       this.decorateOpenTabs();
       // Clear ci-processed markers so stale links pick up the new icon/color
-      document.querySelectorAll("a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+      document.querySelectorAll(".internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
       // Remove and re-inject icons inside Bases (folder mapping or quality may have changed)
       document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach(el => el.remove());
       this.decorateBases();
@@ -955,7 +955,7 @@ var CustomizeIconsSettingTab = class extends obsidian.PluginSettingTab {
             this.plugin._basesObservers.forEach(obs => obs.disconnect());
             this.plugin._basesObservers.clear();
             document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach(el => el.remove());
-            document.querySelectorAll(".bases-view a.internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
+            document.querySelectorAll(".bases-view .internal-link[data-ci-processed]").forEach(el => el.removeAttribute("data-ci-processed"));
           }
         }));
 
