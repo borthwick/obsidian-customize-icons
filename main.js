@@ -357,7 +357,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.5.2 loaded");
+    new obsidian.Notice("Customize Icons v1.6.0 loaded");
   }
 
   onunload() {
@@ -921,13 +921,20 @@ var CustomizeIconsSettingTab = class extends obsidian.PluginSettingTab {
         }));
 
     new obsidian.Setting(el)
-      .setName("Toggle icons in links")
-      .setDesc("Show icons next to internal links to other notes")
+      .setName("Show icons in page body")
+      .setDesc("Show folder icons next to inline [[wikilinks]] in the note body (reading mode + live preview). Makes it visible at a glance which folder each linked file lives in — e.g. a red circle for elevated claims in 0. Claims/, no icon for candidates still in wiki/claims/.")
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.showInLinks)
         .onChange(async (val) => {
           this.plugin.settings.showInLinks = val;
           await this.plugin.saveSettings();
+          if (val) {
+            // Force reading-view postprocessor + editor extension to re-decorate
+            this.plugin.app.workspace.trigger("layout-change");
+          } else {
+            // Strip existing body-of-page inline-link icons
+            document.querySelectorAll(".markdown-preview-view .customize-icons-link-icon, .markdown-source-view .customize-icons-link-icon").forEach(el => el.remove());
+          }
         }));
 
     new obsidian.Setting(el)
