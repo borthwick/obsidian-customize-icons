@@ -364,7 +364,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.6.3 loaded");
+    new obsidian.Notice("Customize Icons v1.6.4 loaded");
   }
 
   onunload() {
@@ -696,24 +696,17 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       decorateLinks() {
         if (!plugin.settings.showInLinks) return;
         var dom = this.view.dom;
-        // Legacy Obsidian selectors + CodeMirror 6 Live Preview wrapper (Obsidian 1.10+).
-        // In CM6, wikilinks render as: <span class="cm-hmd-internal-link"><span class="cm-underline">…text…</span></span>
-        // We target the OUTER .cm-hmd-internal-link (specific to wikilinks) instead of .cm-underline (too broad — used for other decorations too).
-        var links = dom.querySelectorAll(".cm-hmd-internal-link, .internal-link");
+        // Only target rendered <a class="internal-link"> elements (the legacy Obsidian path).
+        // We deliberately DO NOT touch CM6's .cm-hmd-internal-link or .cm-underline —
+        // direct DOM insertion inside CodeMirror 6 content spans breaks the editor's
+        // own rendering (wikilinks show as raw [[...]] syntax after the next update).
+        // For inline icons on wikilinks in the note body, use Reading Mode instead.
+        var links = dom.querySelectorAll("a.internal-link");
         var activeFile = plugin.app.workspace.getActiveFile();
         var sourcePath = activeFile ? activeFile.path : "";
         for (var link of links) {
           if (link.querySelector(".customize-icons-link-icon")) continue;
-          // Try data-href first (legacy path). If absent, fall back to text content —
-          // .cm-underline spans in CM6 Live Preview carry the link target as their visible text.
           var href = link.getAttribute("data-href");
-          if (!href) {
-            var txt = (link.textContent || "").trim();
-            if (!txt) continue;
-            // If it's an alias-form [[target|alias]] the underline span contains only the visible text;
-            // that's fine — Obsidian resolves both the target and the alias to the same file.
-            href = txt;
-          }
           if (!href) continue;
           var file = plugin.app.metadataCache.getFirstLinkpathDest(href, sourcePath);
           if (!file) continue;
