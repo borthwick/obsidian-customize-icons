@@ -1,0 +1,63 @@
+// Reading-mode + shared link-icon insertion (also used by Bases + editor extension).
+
+import { MarkdownPostProcessorContext } from "obsidian";
+import type CustomizeIconsPlugin from "../main";
+import { ConnectivitySurface, FolderIcon } from "../types";
+import { createEmojiElement, createIconElement } from "../icons/render";
+import { loadSvg, parseIconId, resolveIconForPath } from "../icons/index";
+
+export function processReadingModeLinks(
+  plugin: CustomizeIconsPlugin,
+  el: HTMLElement,
+  ctx: MarkdownPostProcessorContext,
+): void {
+  if (!plugin.settings.showInLinks) return;
+  const links = el.querySelectorAll("a.internal-link");
+  for (const link of Array.from(links)) {
+    if (link.querySelector(".customize-icons-link-icon")) continue;
+
+    const href = link.getAttribute("data-href");
+    if (!href) continue;
+
+    const file = plugin.app.metadataCache.getFirstLinkpathDest(href, ctx.sourcePath || "");
+    if (!file) continue;
+
+    const iconConfig = resolveIconForPath(file.path, plugin.settings.folderIcons);
+    if (!iconConfig) continue;
+
+    insertLinkIcon(plugin, link as HTMLElement, file.path, iconConfig, "links");
+  }
+}
+
+export async function insertLinkIcon(
+  plugin: CustomizeIconsPlugin,
+  link: HTMLElement,
+  filePath: string,
+  iconConfig: FolderIcon,
+  surface: ConnectivitySurface = "links",
+): Promise<void> {
+  const parsed = parseIconId(iconConfig.icon);
+  if (!parsed) return;
+
+  const span = document.createElement("span");
+  span.classList.add("customize-icons-link-icon");
+
+  const qualityInfo = plugin.getQualityColorInfo(filePath, surface);
+
+  if (parsed.type === "emoji") {
+    span.appendChild(createEmojiElement(parsed.emoji));
+  } else {
+    const svg = await loadSvg(
+      plugin.app.vault.adapter,
+      plugin.settings.iconPacksPath,
+      parsed.pack,
+      parsed.name,
+    );
+    if (!svg) return;
+    const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
+    const iconEl = createIconElement(svg, color, qualityInfo.cssClass);
+    span.appendChild(iconEl);
+  }
+
+  link.insertBefore(span, link.firstChild);
+}
