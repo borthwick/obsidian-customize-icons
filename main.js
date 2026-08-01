@@ -184,9 +184,16 @@ async function buildIconIndex(adapter, iconsPath) {
 function createIconElement(svgString, color, qualityClass) {
   var span = document.createElement("span");
   if (svgString) {
-    span.innerHTML = svgString;
+    // Strip <title> tags — some SVG icon packs include ARIA titles like
+    // "<title>San Francisco Municipal Railway</title>" for accessibility.
+    // In normal DOM these are invisible metadata, but in CodeMirror 6 Live Preview
+    // contexts they leak through as visible text next to the icon.
+    var cleaned = svgString.replace(/<title>[\s\S]*?<\/title>/gi, "");
+    span.innerHTML = cleaned;
     var svg = span.querySelector("svg");
     if (svg) {
+      // Make SVG explicitly aria-hidden so screen-readers still ignore it after title removal
+      svg.setAttribute("aria-hidden", "true");
       if (color) {
         svg.style.stroke = color;
         svg.style.color = color;
@@ -357,7 +364,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.6.2 loaded");
+    new obsidian.Notice("Customize Icons v1.6.3 loaded");
   }
 
   onunload() {
