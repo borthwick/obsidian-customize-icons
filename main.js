@@ -357,7 +357,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.6.1 loaded");
+    new obsidian.Notice("Customize Icons v1.6.2 loaded");
   }
 
   onunload() {
@@ -689,8 +689,10 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       decorateLinks() {
         if (!plugin.settings.showInLinks) return;
         var dom = this.view.dom;
-        // Legacy Obsidian selectors + CodeMirror 6 Live Preview class (.cm-underline used since Obsidian 1.10+)
-        var links = dom.querySelectorAll(".cm-hmd-internal-link .internal-link, .internal-link, .cm-underline");
+        // Legacy Obsidian selectors + CodeMirror 6 Live Preview wrapper (Obsidian 1.10+).
+        // In CM6, wikilinks render as: <span class="cm-hmd-internal-link"><span class="cm-underline">…text…</span></span>
+        // We target the OUTER .cm-hmd-internal-link (specific to wikilinks) instead of .cm-underline (too broad — used for other decorations too).
+        var links = dom.querySelectorAll(".cm-hmd-internal-link, .internal-link");
         var activeFile = plugin.app.workspace.getActiveFile();
         var sourcePath = activeFile ? activeFile.path : "";
         for (var link of links) {
