@@ -357,7 +357,7 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
     // Register editor extension for live preview links
     this.registerEditorExtension([this.createEditorExtension()]);
 
-    new obsidian.Notice("Customize Icons v1.6.0 loaded");
+    new obsidian.Notice("Customize Icons v1.6.1 loaded");
   }
 
   onunload() {
@@ -689,13 +689,23 @@ var CustomizeIconsPlugin = class extends obsidian.Plugin {
       decorateLinks() {
         if (!plugin.settings.showInLinks) return;
         var dom = this.view.dom;
-        var links = dom.querySelectorAll(".cm-hmd-internal-link .internal-link, .internal-link");
+        // Legacy Obsidian selectors + CodeMirror 6 Live Preview class (.cm-underline used since Obsidian 1.10+)
+        var links = dom.querySelectorAll(".cm-hmd-internal-link .internal-link, .internal-link, .cm-underline");
+        var activeFile = plugin.app.workspace.getActiveFile();
+        var sourcePath = activeFile ? activeFile.path : "";
         for (var link of links) {
           if (link.querySelector(".customize-icons-link-icon")) continue;
+          // Try data-href first (legacy path). If absent, fall back to text content —
+          // .cm-underline spans in CM6 Live Preview carry the link target as their visible text.
           var href = link.getAttribute("data-href");
+          if (!href) {
+            var txt = (link.textContent || "").trim();
+            if (!txt) continue;
+            // If it's an alias-form [[target|alias]] the underline span contains only the visible text;
+            // that's fine — Obsidian resolves both the target and the alias to the same file.
+            href = txt;
+          }
           if (!href) continue;
-          var activeFile = plugin.app.workspace.getActiveFile();
-          var sourcePath = activeFile ? activeFile.path : "";
           var file = plugin.app.metadataCache.getFirstLinkpathDest(href, sourcePath);
           if (!file) continue;
           var iconConfig = resolveIconForPath(file.path, plugin.settings.folderIcons);
