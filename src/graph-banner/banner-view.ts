@@ -61,6 +61,11 @@ export class GraphBannerView {
     overlay.addEventListener("pointerup", () => {
       if (this.isActive()) return;
       this.setActive(true);
+      // Run a continuous render loop while interactive so native graph
+      // controls (center force, node repel, filters) update the canvas
+      // in real time. Detached leaves pause their own rAF loop, so we
+      // supply one from outside.
+      this.startInteractiveRenderLoop();
       const controller = new AbortController();
       document.addEventListener(
         "pointerdown",
@@ -74,6 +79,18 @@ export class GraphBannerView {
         { signal: controller.signal },
       );
     });
+  }
+
+  private startInteractiveRenderLoop(): void {
+    const view = this.leaf.view as any;
+    const renderer = view?.renderer;
+    if (!renderer || typeof renderer.render !== "function") return;
+    const loop = () => {
+      if (!this.isActive() || !this.node.isConnected) return;
+      try { renderer.render(); } catch (e) {}
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
   }
 
   isActive(): boolean {
@@ -241,14 +258,34 @@ export class GraphBannerView {
     const renderer = view?.renderer;
     if (!renderer) return;
     try {
+      if (typeof renderer.reset === "function") renderer.reset();
+      if (typeof renderer.centerAndZoom === "function") renderer.centerAndZoom(1);
+      if (typeof renderer.setPan === "function") renderer.setPan(0, 0);
+      if (typeof renderer.zoomTo === "function") renderer.zoomTo(1);
       if (typeof renderer.scale === "number") renderer.scale = 1;
       if (typeof renderer.px === "number") renderer.px = 0;
       if (typeof renderer.py === "number") renderer.py = 0;
       if (typeof renderer.targetScale === "number") renderer.targetScale = 1;
-      if (typeof renderer.zoomTo === "function") renderer.zoomTo(1);
+      if (typeof renderer.targetPx === "number") renderer.targetPx = 0;
+      if (typeof renderer.targetPy === "number") renderer.targetPy = 0;
       if (typeof renderer.onResize === "function") renderer.onResize();
       if (typeof renderer.render === "function") renderer.render();
     } catch (e) {}
+    // Draw for a burst of frames so pan/zoom lands visibly.
+    this.pumpRenderer(30);
+  }
+
+  private pumpRenderer(frames: number): void {
+    const view = this.leaf.view as any;
+    const renderer = view?.renderer;
+    if (!renderer || typeof renderer.render !== "function") return;
+    let n = 0;
+    const tick = () => {
+      try { renderer.render(); } catch (e) {}
+      n++;
+      if (n < frames && this.node.isConnected) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   isDescendantOf(el: Element): boolean {
