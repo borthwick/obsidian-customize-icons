@@ -40,6 +40,9 @@ export function createEditorExtension(plugin: CustomizeIconsPlugin): any {
 
       decorateLinks() {
         if (!plugin.settings.showInLinks) return;
+        // When the CM6 widget path is on, it owns Live Preview link icons.
+        // Skipping here prevents doubled icons on each wikilink.
+        if (plugin.settings.enableLivePreviewLinkIcons) return;
         const dom = this.view.dom as HTMLElement;
         // Only target rendered <a class="internal-link"> elements (the legacy Obsidian path).
         const links = dom.querySelectorAll("a.internal-link");

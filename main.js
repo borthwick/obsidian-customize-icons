@@ -544,6 +544,9 @@ function setBundledIcons(icons) {
 function getBundledIcons() {
   return BUNDLED_ICONS;
 }
+function getIconIndex() {
+  return iconIndex;
+}
 function parseIconId(id) {
   if (!id)
     return null;
@@ -673,6 +676,12 @@ function invalidateConnectivity() {
 }
 function getConnectivityScore(filePath) {
   return connectivityCache.get(filePath) || 0;
+}
+function getAllConnectivityScores() {
+  return Array.from(connectivityCache.values());
+}
+function getConnectivityCacheEntries() {
+  return Array.from(connectivityCache.entries());
 }
 function buildConnectivityScores(app, settings) {
   connectivityCache.clear();
@@ -982,6 +991,8 @@ function createEditorExtension(plugin) {
       decorateLinks() {
         if (!plugin.settings.showInLinks)
           return;
+        if (plugin.settings.enableLivePreviewLinkIcons)
+          return;
         const dom = this.view.dom;
         const links = dom.querySelectorAll("a.internal-link");
         const activeFile = plugin.app.workspace.getActiveFile();
@@ -1214,6 +1225,7 @@ function escapeXml(s) {
 var _GraphBannerView = class {
   constructor(app, timeToRemoveLeaf) {
     this.leaf = app.workspace.getLeaf("tab");
+    this.hideTransientTab();
     this.setupLeafPromise = this.setupLeaf(timeToRemoveLeaf);
     const content = this.leaf.view.containerEl.find(".view-content");
     this.node = content;
@@ -1221,11 +1233,33 @@ var _GraphBannerView = class {
   }
   async setupLeaf(timeToRemoveLeaf) {
     await this.leaf.setViewState({ type: "localgraph" });
-    const removeChild = () => this.leaf.parent.removeChild(this.leaf);
+    const removeChild = () => {
+      var _a, _b;
+      try {
+        (_b = (_a = this.leaf.parent) == null ? void 0 : _a.removeChild) == null ? void 0 : _b.call(_a, this.leaf);
+      } catch (e) {
+      }
+    };
     if (timeToRemoveLeaf > 0)
       setTimeout(removeChild, timeToRemoveLeaf);
     else
       removeChild();
+  }
+  // Hide the transient tab header via CSS so the tab bar doesn't briefly
+  // shift right when the banner leaf is created — that was making tab
+  // clicks land on the wrong tab.
+  hideTransientTab() {
+    try {
+      const tabHeader = this.leaf.tabHeaderEl;
+      if (tabHeader) {
+        tabHeader.style.display = "none";
+        tabHeader.setAttribute("data-ci-transient", "1");
+      }
+      const container = this.leaf.containerEl;
+      if (container)
+        container.setAttribute("data-ci-transient", "1");
+    } catch (e) {
+    }
   }
   setupNode() {
     this.node.addClass(_GraphBannerView.nodeClass);
@@ -1262,27 +1296,188 @@ var _GraphBannerView = class {
   setActive(active) {
     this.node.dataset.interactive = active ? "true" : "false";
   }
-  async placeTo(view) {
-    var _a, _b;
+  async placeTo(view, colorGroups) {
+    var _a, _b, _c, _d;
     await this.setupLeafPromise;
     await this.leaf.setViewState({
       type: "localgraph",
-      state: { file: (_a = view.file) == null ? void 0 : _a.path }
+      state: {
+        file: (_a = view.file) == null ? void 0 : _a.path,
+        // Some Obsidian versions read colorGroups from state.colorGroups,
+        // others from state.options.colorGroups — send both to be safe.
+        colorGroups: colorGroups || [],
+        options: { colorGroups: colorGroups || [] }
+      }
     });
-    this.leaf.setGroup((_b = view.file) == null ? void 0 : _b.path);
-    const mode = view.getMode();
-    const container = view.containerEl.find(`.markdown-${mode}-view`);
-    if (!container)
+    this.applyColorGroupsToRenderer(colorGroups || []);
+    (_d = (_c = this.leaf).setGroup) == null ? void 0 : _d.call(_c, (_b = view.file) == null ? void 0 : _b.path);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const mode = view.getMode();
+      const container = view.containerEl.find(
+        `.markdown-${mode}-view`
+      );
+      if (container) {
+        if (this.isDescendantOf(container)) {
+          this.kickCanvas();
+          setTimeout(() => this.recenter(), 600);
+          return;
+        }
+        const inlineTitle = container.querySelector(".inline-title");
+        if (inlineTitle && inlineTitle.parentElement) {
+          inlineTitle.parentElement.insertBefore(this.node, inlineTitle.nextSibling);
+          this.installRecenterButton();
+          this.kickCanvas();
+          setTimeout(() => this.recenter(), 600);
+          return;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  scheduleAutoRecenter() {
+    setTimeout(() => {
+      this.recenter();
+      this.recoverIfEmpty();
+    }, 600);
+  }
+  // If the renderer has zero nodes after settling, the setViewState / retarget
+  // silently failed (happens on very large local graphs). Recycle the leaf:
+  // set to empty view, then back to localgraph with the target file. This
+  // rebuilds the view fresh.
+  recoverIfEmpty() {
+    var _a, _b;
+    const view = this.leaf.view;
+    const nodes = (_a = view == null ? void 0 : view.renderer) == null ? void 0 : _a.nodes;
+    if (nodes && nodes.length > 0)
       return;
-    if (this.isDescendantOf(container))
+    const filePath = (_b = view == null ? void 0 : view.file) == null ? void 0 : _b.path;
+    if (!filePath)
       return;
-    const inlineTitle = container.querySelector(".inline-title");
-    if (!inlineTitle)
+    (async () => {
+      try {
+        await this.leaf.setViewState({ type: "empty" });
+        await this.leaf.setViewState({
+          type: "localgraph",
+          state: { file: filePath }
+        });
+        this.kickCanvas();
+        setTimeout(() => this.recenter(), 500);
+      } catch (e) {
+      }
+    })();
+  }
+  async retargetTo(view, colorGroups) {
+    var _a, _b, _c, _d, _e, _f;
+    await this.setupLeafPromise;
+    await this.leaf.setViewState({
+      type: "localgraph",
+      state: {
+        file: (_a = view.file) == null ? void 0 : _a.path,
+        // Some Obsidian versions read colorGroups from state.colorGroups,
+        // others from state.options.colorGroups — send both to be safe.
+        colorGroups: colorGroups || [],
+        options: { colorGroups: colorGroups || [] }
+      }
+    });
+    this.applyColorGroupsToRenderer(colorGroups || []);
+    (_d = (_c = this.leaf).setGroup) == null ? void 0 : _d.call(_c, (_b = view.file) == null ? void 0 : _b.path);
+    try {
+      (_f = (_e = this.leaf).rebuildView) == null ? void 0 : _f.call(_e);
+    } catch (e) {
+    }
+    this.kickCanvas();
+    this.scheduleAutoRecenter();
+  }
+  // Push color groups into THIS banner's renderer. The banner's leaf is
+  // detached from the tab bar, so it's not in workspace.getLeavesOfType and
+  // won't be refreshed by the global sync's broadcast — we have to poke it
+  // directly. Called from placeTo/retargetTo with the groups the manager
+  // just synced.
+  applyColorGroups(groups) {
+    if (!Array.isArray(groups) || groups.length === 0)
       return;
-    const parent = inlineTitle.parentElement;
-    if (!parent)
-      throw new Error("Failed to get note header");
-    parent.insertBefore(this.node, inlineTitle.nextSibling);
+    const view = this.leaf.view;
+    const renderer = view == null ? void 0 : view.renderer;
+    if (!renderer)
+      return;
+    let attempts = 0;
+    const tick = () => {
+      try {
+        renderer.colorGroupOptions = groups;
+        if (view.options)
+          view.options.colorGroups = groups;
+        if (typeof renderer.onOptionsChange === "function")
+          renderer.onOptionsChange();
+        if (typeof renderer.render === "function")
+          renderer.render();
+      } catch (e) {
+      }
+      attempts++;
+      if (attempts < 3)
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  // Legacy — kept so old callers don't break.
+  applyColorGroupsToRenderer(_groups) {
+  }
+  // Force the graph renderer to draw. Obsidian's local-graph pauses its
+  // rAF loop when the leaf isn't the active leaf.
+  kickCanvas() {
+    const view = this.leaf.view;
+    const renderer = view == null ? void 0 : view.renderer;
+    if (!renderer)
+      return;
+    let attempts = 0;
+    const tick = () => {
+      try {
+        if (typeof renderer.onResize === "function")
+          renderer.onResize();
+        if (typeof renderer.render === "function")
+          renderer.render();
+      } catch (e) {
+      }
+      attempts++;
+      if (attempts < 6)
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  installRecenterButton() {
+    if (this.node.querySelector(".graph-banner-recenter"))
+      return;
+    const btn = document.createElement("button");
+    btn.classList.add("graph-banner-recenter");
+    btn.setAttribute("aria-label", "Re-center graph");
+    btn.textContent = "\u2316";
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this.recenter();
+    });
+    this.node.appendChild(btn);
+  }
+  recenter() {
+    const view = this.leaf.view;
+    const renderer = view == null ? void 0 : view.renderer;
+    if (!renderer)
+      return;
+    try {
+      if (typeof renderer.scale === "number")
+        renderer.scale = 1;
+      if (typeof renderer.px === "number")
+        renderer.px = 0;
+      if (typeof renderer.py === "number")
+        renderer.py = 0;
+      if (typeof renderer.targetScale === "number")
+        renderer.targetScale = 1;
+      if (typeof renderer.zoomTo === "function")
+        renderer.zoomTo(1);
+      if (typeof renderer.onResize === "function")
+        renderer.onResize();
+      if (typeof renderer.render === "function")
+        renderer.render();
+    } catch (e) {
+    }
   }
   isDescendantOf(el) {
     return el.contains(this.node);
@@ -1291,8 +1486,14 @@ var _GraphBannerView = class {
     this.node.toggleClass("hidden", !visible);
   }
   detach() {
-    this.leaf.detach();
+    try {
+      this.leaf.detach();
+    } catch (e) {
+    }
     this.node.removeClass(_GraphBannerView.nodeClass);
+    if (this.node.parentElement) {
+      this.node.parentElement.removeChild(this.node);
+    }
   }
 };
 var GraphBannerView = _GraphBannerView;
@@ -1303,17 +1504,61 @@ GraphBannerView.overlayNodeClass = "graph-banner-overlay";
 var GraphBannerManager = class {
   constructor(timeToRemoveLeaf) {
     this.graphViews = [];
+    // Per-pane in-flight placement lock. file-open, active-leaf-change, and
+    // layout-change can all fire in rapid succession for the same pane; without
+    // this lock, they race and create multiple stacked banners.
+    this.inFlight = /* @__PURE__ */ new Map();
+    // Track which file each pane's banner is showing, so if a duplicate call
+    // comes in for the same file we can skip work entirely.
+    this.paneFile = /* @__PURE__ */ new Map();
     this.timeToRemoveLeaf = timeToRemoveLeaf;
   }
-  async placeGraphView(app, view, ignoreMatcher) {
+  async placeGraphView(app, view, ignoreMatcher, opts = {}) {
     var _a;
     const filePath = (_a = view.file) == null ? void 0 : _a.path;
     if (!filePath)
       return;
+    const paneEl = view.containerEl;
+    const pending = this.inFlight.get(paneEl);
+    if (pending) {
+      await pending;
+      if (this.paneFile.get(paneEl) === filePath && !opts.forceFresh)
+        return;
+    }
+    if (!opts.forceFresh && this.paneFile.get(paneEl) === filePath)
+      return;
+    const run = this.doPlace(app, view, ignoreMatcher, opts, paneEl, filePath);
+    this.inFlight.set(paneEl, run);
+    try {
+      await run;
+    } finally {
+      if (this.inFlight.get(paneEl) === run)
+        this.inFlight.delete(paneEl);
+    }
+  }
+  async doPlace(app, view, ignoreMatcher, opts, paneEl, filePath) {
     const ignored = ignoreMatcher.test(filePath);
+    const existing = this.graphViews.find((v) => v.isDescendantOf(paneEl));
+    if (existing && !opts.forceFresh) {
+      existing.setVisibility(!ignored);
+      await existing.retargetTo(view, opts.colorGroups);
+      if (opts.colorGroups)
+        existing.applyColorGroups(opts.colorGroups);
+      this.paneFile.set(paneEl, filePath);
+      return;
+    }
+    if (opts.forceFresh && existing) {
+      const staleIdx = this.graphViews.indexOf(existing);
+      existing.detach();
+      if (staleIdx >= 0)
+        this.graphViews.splice(staleIdx, 1);
+    }
     const bannerView = this.findAvailableGraphView(app, view);
     bannerView.setVisibility(!ignored);
-    await bannerView.placeTo(view);
+    await bannerView.placeTo(view, opts.colorGroups);
+    if (opts.colorGroups)
+      bannerView.applyColorGroups(opts.colorGroups);
+    this.paneFile.set(paneEl, filePath);
   }
   findAvailableGraphView(app, view) {
     const existing = this.graphViews.find((v) => v.isDescendantOf(view.containerEl));
@@ -1332,6 +1577,8 @@ var GraphBannerManager = class {
     for (const v of this.graphViews)
       v.detach();
     this.graphViews = [];
+    this.inFlight.clear();
+    this.paneFile.clear();
   }
 };
 
@@ -1351,6 +1598,119 @@ var IgnoreMatcher = class {
     return this.matcher.ignores(path);
   }
 };
+
+// src/graph-banner/color-groups.ts
+var CI_TAG = "__ci_managed__";
+function hexToRgbInt(hex) {
+  const cleaned = (hex || "").replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{6}$/i.test(cleaned))
+    return 0;
+  return parseInt(cleaned, 16);
+}
+function lighten(hex, t) {
+  const int = hexToRgbInt(hex);
+  const r = int >> 16 & 255;
+  const g = int >> 8 & 255;
+  const b = int & 255;
+  const lr = Math.round(r + (255 - r) * t);
+  const lg = Math.round(g + (255 - g) * t);
+  const lb = Math.round(b + (255 - b) * t);
+  return lr << 16 | lg << 8 | lb;
+}
+function pathsToQueries(paths) {
+  const chunks = [];
+  for (let i = 0; i < paths.length; i += 100) {
+    chunks.push(paths.slice(i, i + 100));
+  }
+  return chunks.map(
+    (chunk) => chunk.map((p) => `path:"${p.replace(/"/g, '\\"')}"`).join(" OR ")
+  );
+}
+function buildLocalGraphColorGroups(app, settings) {
+  const groups = [];
+  if (settings.enableQualityColoring) {
+    groups.push({
+      color: { a: 1, rgb: hexToRgbInt(settings.qualityHighColor) },
+      query: `["Quality score":>=${settings.qualityHighThreshold}]`
+    });
+    groups.push({
+      color: { a: 1, rgb: hexToRgbInt(settings.qualityExistsColor) },
+      query: '["Quality score":true]'
+    });
+  }
+  if (settings.enableConnectivityColoring) {
+    if (!isConnectivityBuilt())
+      buildConnectivityScores(app, settings);
+    const entries = getConnectivityCacheEntries().filter(([, s]) => s >= settings.connectivityThreshold).sort((a, b) => b[1] - a[1]);
+    if (entries.length > 0) {
+      const tier1Idx = Math.max(1, Math.floor(entries.length * 0.1));
+      const tier2Idx = Math.max(tier1Idx + 1, Math.floor(entries.length * 0.35));
+      const tier1 = entries.slice(0, tier1Idx).map((e) => e[0]);
+      const tier2 = entries.slice(tier1Idx, tier2Idx).map((e) => e[0]);
+      const tier3 = entries.slice(tier2Idx).map((e) => e[0]);
+      const baseHex = settings.connectivityColor;
+      const tierColors = [
+        [tier1, lighten(baseHex, 0)],
+        // full color — strongest hubs
+        [tier2, lighten(baseHex, 0.35)],
+        // medium — solid hubs
+        [tier3, lighten(baseHex, 0.65)]
+        // lightest — moderately connected
+      ];
+      for (const [paths, rgb] of tierColors) {
+        for (const query of pathsToQueries(paths)) {
+          if (!query)
+            continue;
+          groups.push({ color: { a: 1, rgb }, query });
+        }
+      }
+    }
+  }
+  return groups;
+}
+function syncColorGroupsToGraphPlugin(app, settings) {
+  var _a, _b, _c;
+  const ours = buildLocalGraphColorGroups(app, settings).map((g) => ({
+    ...g,
+    [CI_TAG]: true
+  }));
+  try {
+    const gp = (_c = (_b = (_a = app == null ? void 0 : app.internalPlugins) == null ? void 0 : _a.plugins) == null ? void 0 : _b.graph) == null ? void 0 : _c.instance;
+    if (!gp || !gp.options)
+      return ours;
+    const existing = Array.isArray(gp.options.colorGroups) ? gp.options.colorGroups.filter((g) => !g[CI_TAG]) : [];
+    const merged = [...ours, ...existing];
+    const changed = JSON.stringify(gp.options.colorGroups) !== JSON.stringify(merged);
+    if (changed) {
+      gp.options.colorGroups = merged;
+      if (typeof gp.saveOptions === "function")
+        gp.saveOptions();
+      const refresh = (leafType) => {
+        app.workspace.getLeavesOfType(leafType).forEach((l) => {
+          try {
+            const view = l.view;
+            if (view == null ? void 0 : view.options)
+              view.options.colorGroups = merged;
+            if (view == null ? void 0 : view.renderer) {
+              view.renderer.colorGroupOptions = merged;
+              if (typeof view.renderer.onOptionsChange === "function") {
+                view.renderer.onOptionsChange();
+              }
+              if (typeof view.renderer.render === "function")
+                view.renderer.render();
+            }
+          } catch (e) {
+          }
+        });
+      };
+      refresh("graph");
+      refresh("localgraph");
+    }
+    return merged;
+  } catch (e) {
+  }
+  return ours;
+}
 
 // src/settings.ts
 var import_obsidian4 = require("obsidian");
@@ -1399,29 +1759,52 @@ var IconPickerModal = class extends import_obsidian3.Modal {
       }
     });
     const gridContainer = contentEl.createDiv({ cls: "ci-icon-picker-container" });
+    const seen = /* @__PURE__ */ new Set();
     const bundled = getBundledIcons();
     if (bundled) {
       for (const id in bundled) {
         this.allIcons.push({ id, svg: bundled[id] });
-      }
-    } else {
-      const iconsPath = this.plugin.settings.iconPacksPath + "/customize-icons";
-      try {
-        const listing = await this.app.vault.adapter.list(iconsPath);
-        if (listing && listing.files) {
-          for (const filePath of listing.files) {
-            if (filePath.endsWith(".svg")) {
-              const fileName = filePath.split("/").pop().replace(".svg", "");
-              const svgContent = await this.app.vault.adapter.read(filePath);
-              if (svgContent && svgContent.length > 50) {
-                this.allIcons.push({ id: fileName, svg: svgContent });
-              }
-            }
-          }
-        }
-      } catch (e) {
+        seen.add(id);
       }
     }
+    const flatPath = this.plugin.settings.iconPacksPath + "/customize-icons";
+    try {
+      const listing = await this.app.vault.adapter.list(flatPath);
+      if (listing && listing.files) {
+        for (const filePath of listing.files) {
+          if (!filePath.endsWith(".svg"))
+            continue;
+          const id = filePath.split("/").pop().replace(".svg", "");
+          const svg = await this.app.vault.adapter.read(filePath);
+          if (!svg || svg.length <= 50)
+            continue;
+          if (seen.has(id)) {
+            const idx = this.allIcons.findIndex((i) => i.id === id);
+            if (idx >= 0)
+              this.allIcons[idx] = { id, svg };
+          } else {
+            this.allIcons.push({ id, svg });
+            seen.add(id);
+          }
+        }
+      }
+    } catch (e) {
+    }
+    for (const entry of getIconIndex()) {
+      if (seen.has(entry.id))
+        continue;
+      const svg = await loadSvg(
+        this.app.vault.adapter,
+        this.plugin.settings.iconPacksPath,
+        entry.pack,
+        entry.name
+      );
+      if (!svg || svg.length <= 50)
+        continue;
+      this.allIcons.push({ id: entry.id, svg });
+      seen.add(entry.id);
+    }
+    this.allIcons.sort((a, b) => a.id.localeCompare(b.id));
     this.renderGrid(gridContainer, this.allIcons);
     searchInput.addEventListener("input", () => {
       const query = searchInput.value.toLowerCase();
@@ -1460,6 +1843,64 @@ var IconPickerModal = class extends import_obsidian3.Modal {
 };
 
 // src/settings.ts
+function pct(scores, p) {
+  if (scores.length === 0)
+    return 0;
+  const idx = Math.min(scores.length - 1, Math.floor(scores.length * p / 100));
+  return scores[idx];
+}
+function renderConnectivityStats(el, scores, currentThreshold) {
+  if (scores.length === 0) {
+    el.createEl("p", {
+      text: "No connectivity scores computed \u2014 vault may have no resolved links.",
+      cls: "setting-item-description"
+    });
+    return;
+  }
+  const total = scores.length;
+  const nonZero = scores.filter((s) => s > 0).length;
+  const max = scores[scores.length - 1];
+  const summary = el.createDiv({ cls: "ci-stats-summary" });
+  summary.createEl("p", {
+    text: `Scored ${total.toLocaleString()} files (${nonZero.toLocaleString()} non-zero). Max score: ${max}.`,
+    cls: "setting-item-description"
+  });
+  const grid = el.createDiv({ cls: "ci-stats-grid" });
+  const percentiles = [
+    ["Median", 50],
+    ["P75", 75],
+    ["P80", 80],
+    ["P90", 90],
+    ["P95", 95],
+    ["P99", 99]
+  ];
+  for (const [label, p] of percentiles) {
+    const row = grid.createDiv({ cls: "ci-stats-row" });
+    row.createSpan({ text: label, cls: "ci-stats-label" });
+    row.createSpan({ text: String(pct(scores, p)), cls: "ci-stats-val" });
+  }
+  el.createEl("h4", { text: "Files above threshold" });
+  const table = el.createDiv({ cls: "ci-stats-thresholds" });
+  const candidateThresholds = [5, 7, 9, 10, 12, 15, 20, 30, 50];
+  if (!candidateThresholds.includes(currentThreshold))
+    candidateThresholds.push(currentThreshold);
+  candidateThresholds.sort((a, b) => a - b);
+  for (const t of candidateThresholds) {
+    const above = scores.filter((s) => s >= t).length;
+    const pctAbove = (above * 100 / total).toFixed(1);
+    const row = table.createDiv({ cls: "ci-stats-row" });
+    const label = row.createSpan({
+      text: `\u2265 ${t}${t === currentThreshold ? " (current)" : ""}`,
+      cls: "ci-stats-label"
+    });
+    if (t === currentThreshold)
+      label.style.fontWeight = "bold";
+    row.createSpan({
+      text: `${above.toLocaleString()} files (${pctAbove}%)`,
+      cls: "ci-stats-val"
+    });
+  }
+}
 var CONNECTIVITY_SURFACES = [
   { key: "fileExplorer", name: "  File explorer", desc: "Left-sidebar file tree" },
   { key: "tabs", name: "  Tab bar", desc: "Workspace tab headers" },
@@ -1596,7 +2037,7 @@ var CustomizeIconsSettingTab = class extends import_obsidian4.PluginSettingTab {
       })
     );
     new import_obsidian4.Setting(el).setName("Connectivity threshold").setDesc(
-      "Score at or above which the high color is used. Score = (inbound links * 2) + (bidirectional links * 3). Your vault median is 6, 80th percentile is 12."
+      "Score at or above which the high color is used. Score = (inbound links * 2) + (bidirectional links * 3). Click 'Show vault stats' below for your current vault's distribution."
     ).addText(
       (text) => text.setValue(String(this.plugin.settings.connectivityThreshold)).onChange(async (val) => {
         const num = parseInt(val);
@@ -1604,6 +2045,23 @@ var CustomizeIconsSettingTab = class extends import_obsidian4.PluginSettingTab {
           this.plugin.settings.connectivityThreshold = num;
           await this.plugin.saveSettings();
           invalidateConnectivity();
+        }
+      })
+    );
+    const statsBox = el.createDiv({ cls: "ci-connectivity-stats" });
+    new import_obsidian4.Setting(el).setName("Vault connectivity distribution").setDesc(
+      "Compute live percentiles and how many files land above common thresholds. Uses the same scoring logic as the icon coloring."
+    ).addButton(
+      (btn) => btn.setButtonText("Show vault stats").setCta().onClick(async () => {
+        btn.setDisabled(true).setButtonText("Computing...");
+        try {
+          statsBox.empty();
+          invalidateConnectivity();
+          buildConnectivityScores(this.plugin.app, this.plugin.settings);
+          const scores = getAllConnectivityScores().sort((a, b) => a - b);
+          renderConnectivityStats(statsBox, scores, this.plugin.settings.connectivityThreshold);
+        } finally {
+          btn.setDisabled(false).setButtonText("Show vault stats");
         }
       })
     );
@@ -1669,6 +2127,23 @@ var CustomizeIconsSettingTab = class extends import_obsidian4.PluginSettingTab {
           timeToRemoveLeaf: n
         };
         await this.plugin.saveSettings();
+      })
+    );
+    el.createEl("h3", { text: "Icon Library" });
+    new import_obsidian4.Setting(el).setName("Rebuild icon bundle").setDesc(
+      "Rescan .obsidian/icons/customize-icons/ and regenerate icons-bundle.json. Run this after dropping new SVGs into the icons folder (or after Dropbox syncs new icons from another machine)."
+    ).addButton(
+      (btn) => btn.setButtonText("Rebuild").setCta().onClick(async () => {
+        btn.setDisabled(true).setButtonText("Rebuilding...");
+        try {
+          const count = await this.plugin.rebuildIconBundle();
+          new import_obsidian4.Notice(`Icon bundle rebuilt (${count} icons).`);
+        } catch (e) {
+          new import_obsidian4.Notice("Rebuild failed \u2014 check console.");
+          console.error(e);
+        } finally {
+          btn.setDisabled(false).setButtonText("Rebuild");
+        }
       })
     );
     el.createEl("h3", { text: "Folder Icon Assignments" });
@@ -1859,7 +2334,14 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       createEditorExtension(this),
       createLivePreviewExtension(this)
     ]);
+    this.app.workspace.onLayoutReady(() => {
+      syncColorGroupsToGraphPlugin(this.app, this.settings);
+    });
     if (this.settings.graphBanner.enable) {
+      document.querySelectorAll(".graph-banner-content").forEach((el) => {
+        var _a;
+        return (_a = el.parentElement) == null ? void 0 : _a.removeChild(el);
+      });
       this.graphBannerManager = new GraphBannerManager(this.settings.graphBanner.timeToRemoveLeaf);
       this.registerEvent(
         this.app.workspace.on("file-open", async (file) => {
@@ -1873,14 +2355,25 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       );
       this.registerEvent(
         this.app.workspace.on("layout-change", async () => {
-          const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-          if (view)
-            await this.placeGraphBanner(view);
+          const v = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+          if (v && v.file)
+            await this.placeGraphBanner(v);
+        })
+      );
+      this.registerEvent(
+        this.app.workspace.on("active-leaf-change", async (leaf) => {
+          if (!leaf)
+            return;
+          const v = leaf.view;
+          if (v && v.file && v.file.extension === "md")
+            await this.placeGraphBanner(v);
         })
       );
       this.app.workspace.onLayoutReady(async () => {
         for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-          await this.placeGraphBanner(leaf.view);
+          const v = leaf.view;
+          if (v && v.file)
+            await this.placeGraphBanner(v);
         }
       });
     }
@@ -1891,6 +2384,10 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       this.graphBannerManager.detachAll();
       this.graphBannerManager = null;
     }
+    document.querySelectorAll(".graph-banner-content").forEach((el) => {
+      var _a;
+      return (_a = el.parentElement) == null ? void 0 : _a.removeChild(el);
+    });
     if (this._basesObservers) {
       this._basesObservers.forEach((obs) => obs.disconnect());
       this._basesObservers.clear();
@@ -2009,10 +2506,40 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       );
     }
   }
-  async placeGraphBanner(view) {
+  async placeGraphBanner(view, opts = {}) {
     if (!this.graphBannerManager)
       return;
     const matcher = new IgnoreMatcher().add(this.settings.graphBanner.ignore);
-    await this.graphBannerManager.placeGraphView(this.app, view, matcher);
+    const colorGroups = syncColorGroupsToGraphPlugin(this.app, this.settings);
+    await this.graphBannerManager.placeGraphView(this.app, view, matcher, {
+      ...opts,
+      colorGroups
+    });
+  }
+  async rebuildIconBundle() {
+    const bundlePath = ".obsidian/plugins/customize-icons/icons-bundle.json";
+    const bundle = {};
+    const iconsPath = this.settings.iconPacksPath + "/customize-icons";
+    try {
+      const listing = await this.app.vault.adapter.list(iconsPath);
+      if (listing && listing.files) {
+        for (const filePath of listing.files) {
+          if (!filePath.endsWith(".svg"))
+            continue;
+          const id = filePath.split("/").pop().replace(".svg", "");
+          const svg = await this.app.vault.adapter.read(filePath);
+          if (svg && svg.length > 50)
+            bundle[id] = svg;
+        }
+      }
+    } catch (e) {
+      console.error("[customize-icons] rebuildIconBundle scan failed", e);
+      throw e;
+    }
+    await this.app.vault.adapter.write(bundlePath, JSON.stringify(bundle));
+    setBundledIcons(bundle);
+    if (this.settings.enableLivePreviewLinkIcons)
+      await this.warmLivePreviewCache();
+    return Object.keys(bundle).length;
   }
 };

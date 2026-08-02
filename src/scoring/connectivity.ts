@@ -18,6 +18,22 @@ export function getConnectivityScore(filePath: string): number {
   return connectivityCache.get(filePath) || 0;
 }
 
+export function getAllConnectivityScores(): number[] {
+  return Array.from(connectivityCache.values());
+}
+
+export function getHighConnectivityPaths(threshold: number): string[] {
+  const out: string[] = [];
+  connectivityCache.forEach((score, path) => {
+    if (score >= threshold) out.push(path);
+  });
+  return out;
+}
+
+export function getConnectivityCacheEntries(): Array<[string, number]> {
+  return Array.from(connectivityCache.entries());
+}
+
 export function buildConnectivityScores(app: App, settings: CustomizeIconsSettings): void {
   connectivityCache.clear();
   const resolved = (app.metadataCache as any).resolvedLinks as Record<string, Record<string, number>>;

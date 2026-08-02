@@ -5,8 +5,76 @@ import type CustomizeIconsPlugin from "./main";
 import { ConnectivitySurface } from "./types";
 import { createEmojiElement, createIconElement } from "./icons/render";
 import { loadSvg, parseIconId } from "./icons/index";
-import { invalidateConnectivity } from "./scoring/connectivity";
+import {
+  buildConnectivityScores,
+  getAllConnectivityScores,
+  invalidateConnectivity,
+} from "./scoring/connectivity";
 import { IconPickerModal } from "./icon-picker-modal";
+
+function pct(scores: number[], p: number): number {
+  if (scores.length === 0) return 0;
+  const idx = Math.min(scores.length - 1, Math.floor((scores.length * p) / 100));
+  return scores[idx];
+}
+
+function renderConnectivityStats(
+  el: HTMLElement,
+  scores: number[],
+  currentThreshold: number,
+): void {
+  if (scores.length === 0) {
+    el.createEl("p", {
+      text: "No connectivity scores computed — vault may have no resolved links.",
+      cls: "setting-item-description",
+    });
+    return;
+  }
+  const total = scores.length;
+  const nonZero = scores.filter((s) => s > 0).length;
+  const max = scores[scores.length - 1];
+
+  const summary = el.createDiv({ cls: "ci-stats-summary" });
+  summary.createEl("p", {
+    text: `Scored ${total.toLocaleString()} files (${nonZero.toLocaleString()} non-zero). Max score: ${max}.`,
+    cls: "setting-item-description",
+  });
+
+  const grid = el.createDiv({ cls: "ci-stats-grid" });
+  const percentiles: Array<[string, number]> = [
+    ["Median", 50],
+    ["P75", 75],
+    ["P80", 80],
+    ["P90", 90],
+    ["P95", 95],
+    ["P99", 99],
+  ];
+  for (const [label, p] of percentiles) {
+    const row = grid.createDiv({ cls: "ci-stats-row" });
+    row.createSpan({ text: label, cls: "ci-stats-label" });
+    row.createSpan({ text: String(pct(scores, p)), cls: "ci-stats-val" });
+  }
+
+  el.createEl("h4", { text: "Files above threshold" });
+  const table = el.createDiv({ cls: "ci-stats-thresholds" });
+  const candidateThresholds = [5, 7, 9, 10, 12, 15, 20, 30, 50];
+  if (!candidateThresholds.includes(currentThreshold)) candidateThresholds.push(currentThreshold);
+  candidateThresholds.sort((a, b) => a - b);
+  for (const t of candidateThresholds) {
+    const above = scores.filter((s) => s >= t).length;
+    const pctAbove = ((above * 100) / total).toFixed(1);
+    const row = table.createDiv({ cls: "ci-stats-row" });
+    const label = row.createSpan({
+      text: `≥ ${t}${t === currentThreshold ? " (current)" : ""}`,
+      cls: "ci-stats-label",
+    });
+    if (t === currentThreshold) label.style.fontWeight = "bold";
+    row.createSpan({
+      text: `${above.toLocaleString()} files (${pctAbove}%)`,
+      cls: "ci-stats-val",
+    });
+  }
+}
 
 const CONNECTIVITY_SURFACES: Array<{
   key: ConnectivitySurface;
@@ -217,7 +285,7 @@ export class CustomizeIconsSettingTab extends PluginSettingTab {
     new Setting(el)
       .setName("Connectivity threshold")
       .setDesc(
-        "Score at or above which the high color is used. Score = (inbound links * 2) + (bidirectional links * 3). Your vault median is 6, 80th percentile is 12.",
+        "Score at or above which the high color is used. Score = (inbound links * 2) + (bidirectional links * 3). Click 'Show vault stats' below for your current vault's distribution.",
       )
       .addText((text) =>
         text.setValue(String(this.plugin.settings.connectivityThreshold)).onChange(async (val) => {
@@ -228,6 +296,30 @@ export class CustomizeIconsSettingTab extends PluginSettingTab {
             invalidateConnectivity();
           }
         }),
+      );
+
+    const statsBox = el.createDiv({ cls: "ci-connectivity-stats" });
+    new Setting(el)
+      .setName("Vault connectivity distribution")
+      .setDesc(
+        "Compute live percentiles and how many files land above common thresholds. Uses the same scoring logic as the icon coloring.",
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("Show vault stats")
+          .setCta()
+          .onClick(async () => {
+            btn.setDisabled(true).setButtonText("Computing...");
+            try {
+              statsBox.empty();
+              invalidateConnectivity();
+              buildConnectivityScores(this.plugin.app, this.plugin.settings);
+              const scores = getAllConnectivityScores().sort((a, b) => a - b);
+              renderConnectivityStats(statsBox, scores, this.plugin.settings.connectivityThreshold);
+            } finally {
+              btn.setDisabled(false).setButtonText("Show vault stats");
+            }
+          }),
       );
 
     new Setting(el)
@@ -323,6 +415,30 @@ export class CustomizeIconsSettingTab extends PluginSettingTab {
               timeToRemoveLeaf: n,
             };
             await this.plugin.saveSettings();
+          }),
+      );
+
+    el.createEl("h3", { text: "Icon Library" });
+    new Setting(el)
+      .setName("Rebuild icon bundle")
+      .setDesc(
+        "Rescan .obsidian/icons/customize-icons/ and regenerate icons-bundle.json. Run this after dropping new SVGs into the icons folder (or after Dropbox syncs new icons from another machine).",
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("Rebuild")
+          .setCta()
+          .onClick(async () => {
+            btn.setDisabled(true).setButtonText("Rebuilding...");
+            try {
+              const count = await this.plugin.rebuildIconBundle();
+              new Notice(`Icon bundle rebuilt (${count} icons).`);
+            } catch (e) {
+              new Notice("Rebuild failed — check console.");
+              console.error(e);
+            } finally {
+              btn.setDisabled(false).setButtonText("Rebuild");
+            }
           }),
       );
 

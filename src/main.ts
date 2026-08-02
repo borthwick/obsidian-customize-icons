@@ -9,7 +9,7 @@ import {
   DEFAULT_SETTINGS,
   QualityColorInfo,
 } from "./types";
-import { buildIconIndex, parseIconId, setBundledIcons } from "./icons/index";
+import { buildIconIndex, getBundledIcons, parseIconId, setBundledIcons } from "./icons/index";
 import { getQualityScore, invalidateQualityFor } from "./scoring/quality";
 import {
   buildConnectivityScores,
@@ -27,6 +27,7 @@ import { createLivePreviewExtension } from "./live-preview/extension";
 import { warmSvg } from "./live-preview/svg-cache";
 import { GraphBannerManager } from "./graph-banner/banner-manager";
 import { IgnoreMatcher } from "./graph-banner/ignore-matcher";
+import { syncColorGroupsToGraphPlugin } from "./graph-banner/color-groups";
 import { CustomizeIconsSettingTab } from "./settings";
 
 export default class CustomizeIconsPlugin extends Plugin {
@@ -110,8 +111,20 @@ export default class CustomizeIconsPlugin extends Plugin {
       createLivePreviewExtension(this),
     ]);
 
+    // Sync color groups into the internal graph plugin once at load.
+    // Both global and local graphs pick them up. Cheap: only writes to
+    // disk if something changed.
+    this.app.workspace.onLayoutReady(() => {
+      syncColorGroupsToGraphPlugin(this.app, this.settings);
+    });
+
     // Graph banner subsystem — opt-in via graphBanner.enable.
     if (this.settings.graphBanner.enable) {
+      // Sweep any orphan banner nodes left by a previous plugin instance or
+      // Obsidian reload. Prevents the "N stacked gears on reload" bug.
+      document
+        .querySelectorAll(".graph-banner-content")
+        .forEach((el) => el.parentElement?.removeChild(el));
       this.graphBannerManager = new GraphBannerManager(this.settings.graphBanner.timeToRemoveLeaf);
 
       this.registerEvent(
@@ -119,20 +132,39 @@ export default class CustomizeIconsPlugin extends Plugin {
           if (!file || file.extension !== "md") return;
           const view = this.app.workspace.getActiveViewOfType(MarkdownView);
           if (!view || view.file !== file) return;
+          // No forceFresh — the manager reuses the pane's existing banner
+          // via retargetTo() so we don't open a fresh graph tab (which
+          // steals focus) on every navigation.
           await this.placeGraphBanner(view);
         }),
       );
 
+      // Layout change: only place on the ACTIVE view. Iterating all markdown
+      // leaves here causes a placement storm — the banner's own getLeaf("tab")
+      // fires layout-change, which then re-enters and creates duplicate
+      // banners. Background panes get their banner via active-leaf-change
+      // when they come forward.
       this.registerEvent(
         this.app.workspace.on("layout-change", async () => {
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (view) await this.placeGraphBanner(view);
+          const v = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (v && v.file) await this.placeGraphBanner(v);
+        }),
+      );
+
+      // Switching which pane is active also needs a re-place — a background
+      // pane that came forward may never have had a banner attached.
+      this.registerEvent(
+        this.app.workspace.on("active-leaf-change", async (leaf) => {
+          if (!leaf) return;
+          const v = leaf.view as MarkdownView;
+          if (v && v.file && v.file.extension === "md") await this.placeGraphBanner(v);
         }),
       );
 
       this.app.workspace.onLayoutReady(async () => {
         for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-          await this.placeGraphBanner(leaf.view as MarkdownView);
+          const v = leaf.view as MarkdownView;
+          if (v && v.file) await this.placeGraphBanner(v);
         }
       });
     }
@@ -141,11 +173,17 @@ export default class CustomizeIconsPlugin extends Plugin {
   }
 
   onunload(): void {
-    // Detach graph-banner views
+    // Detach graph-banner views (removes their DOM nodes)
     if (this.graphBannerManager) {
       this.graphBannerManager.detachAll();
       this.graphBannerManager = null;
     }
+    // Belt-and-suspenders: nuke every .graph-banner-content still in the DOM.
+    // Handles the case where previous plugin versions left orphans behind or
+    // manager state got out of sync with the DOM.
+    document
+      .querySelectorAll(".graph-banner-content")
+      .forEach((el) => el.parentElement?.removeChild(el));
     // Disconnect Bases observers
     if (this._basesObservers) {
       this._basesObservers.forEach((obs) => obs.disconnect());
@@ -295,9 +333,46 @@ export default class CustomizeIconsPlugin extends Plugin {
     }
   }
 
-  async placeGraphBanner(view: MarkdownView): Promise<void> {
+  async placeGraphBanner(view: MarkdownView, opts: { forceFresh?: boolean } = {}): Promise<void> {
     if (!this.graphBannerManager) return;
     const matcher = new IgnoreMatcher().add(this.settings.graphBanner.ignore);
-    await this.graphBannerManager.placeGraphView(this.app, view, matcher);
+    // Idempotent — no-op if color groups haven't changed since last sync.
+    // Returns the merged group array so we can push it into the banner's
+    // detached leaf directly (workspace.getLeavesOfType misses detached leaves).
+    const colorGroups = syncColorGroupsToGraphPlugin(this.app, this.settings);
+    await this.graphBannerManager.placeGraphView(this.app, view, matcher, {
+      ...opts,
+      colorGroups,
+    });
+  }
+
+  async rebuildIconBundle(): Promise<number> {
+    const bundlePath = ".obsidian/plugins/customize-icons/icons-bundle.json";
+    const bundle: Record<string, string> = {};
+    const iconsPath = this.settings.iconPacksPath + "/customize-icons";
+    try {
+      const listing = await this.app.vault.adapter.list(iconsPath);
+      if (listing && listing.files) {
+        for (const filePath of listing.files) {
+          if (!filePath.endsWith(".svg")) continue;
+          const id = (filePath.split("/").pop() as string).replace(".svg", "");
+          const svg = await this.app.vault.adapter.read(filePath);
+          if (svg && svg.length > 50) bundle[id] = svg;
+        }
+      }
+    } catch (e) {
+      console.error("[customize-icons] rebuildIconBundle scan failed", e);
+      throw e;
+    }
+    await this.app.vault.adapter.write(bundlePath, JSON.stringify(bundle));
+    setBundledIcons(bundle);
+    // Also warm live-preview cache in case the new bundle unlocked icons
+    // referenced by folder assignments.
+    if (this.settings.enableLivePreviewLinkIcons) await this.warmLivePreviewCache();
+    return Object.keys(bundle).length;
   }
 }
+
+// Silences unused-import lint for getBundledIcons which we may reference in
+// future settings/UX flows without a compile change.
+void getBundledIcons;

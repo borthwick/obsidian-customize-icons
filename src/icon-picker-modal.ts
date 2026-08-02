@@ -2,7 +2,7 @@
 
 import { App, Modal } from "obsidian";
 import type CustomizeIconsPlugin from "./main";
-import { getBundledIcons } from "./icons/index";
+import { getBundledIcons, getIconIndex, loadSvg } from "./icons/index";
 
 type IconEntry = { id: string; svg: string };
 
@@ -60,29 +60,57 @@ export class IconPickerModal extends Modal {
     // Grid container
     const gridContainer = contentEl.createDiv({ cls: "ci-icon-picker-container" });
 
-    // Load icons from bundle first, then folder as fallback
+    // Merge bundled icons + live folder scan so newly-added SVGs appear
+    // without a full plugin reinstall.
+    const seen = new Set<string>();
+
+    // 1. Bundled (whatever shipped with the plugin release)
     const bundled = getBundledIcons();
     if (bundled) {
       for (const id in bundled) {
         this.allIcons.push({ id, svg: bundled[id] });
+        seen.add(id);
       }
-    } else {
-      const iconsPath = this.plugin.settings.iconPacksPath + "/customize-icons";
-      try {
-        const listing = await this.app.vault.adapter.list(iconsPath);
-        if (listing && listing.files) {
-          for (const filePath of listing.files) {
-            if (filePath.endsWith(".svg")) {
-              const fileName = (filePath.split("/").pop() as string).replace(".svg", "");
-              const svgContent = await this.app.vault.adapter.read(filePath);
-              if (svgContent && svgContent.length > 50) {
-                this.allIcons.push({ id: fileName, svg: svgContent });
-              }
-            }
+    }
+
+    // 2. Flat customize-icons/ folder (user-dropped SVGs; folder wins over bundle on collision)
+    const flatPath = this.plugin.settings.iconPacksPath + "/customize-icons";
+    try {
+      const listing = await this.app.vault.adapter.list(flatPath);
+      if (listing && listing.files) {
+        for (const filePath of listing.files) {
+          if (!filePath.endsWith(".svg")) continue;
+          const id = (filePath.split("/").pop() as string).replace(".svg", "");
+          const svg = await this.app.vault.adapter.read(filePath);
+          if (!svg || svg.length <= 50) continue;
+          if (seen.has(id)) {
+            // Folder version wins — replace the bundle entry
+            const idx = this.allIcons.findIndex((i) => i.id === id);
+            if (idx >= 0) this.allIcons[idx] = { id, svg };
+          } else {
+            this.allIcons.push({ id, svg });
+            seen.add(id);
           }
         }
-      } catch (e) {}
+      }
+    } catch (e) {}
+
+    // 3. Pack subfolders (voynich-icons, tabler-icons, etc.) — merge from
+    // iconIndex which was built at plugin startup. Load SVGs on demand.
+    for (const entry of getIconIndex()) {
+      if (seen.has(entry.id)) continue;
+      const svg = await loadSvg(
+        this.app.vault.adapter,
+        this.plugin.settings.iconPacksPath,
+        entry.pack,
+        entry.name,
+      );
+      if (!svg || svg.length <= 50) continue;
+      this.allIcons.push({ id: entry.id, svg });
+      seen.add(entry.id);
     }
+
+    this.allIcons.sort((a, b) => a.id.localeCompare(b.id));
 
     this.renderGrid(gridContainer, this.allIcons);
 

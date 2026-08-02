@@ -205,6 +205,40 @@
   font-size: 16px;
 }
 
+/* Connectivity stats display */
+.ci-connectivity-stats {
+  margin: 8px 0 16px 0;
+}
+.ci-connectivity-stats .ci-stats-grid,
+.ci-connectivity-stats .ci-stats-thresholds {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  margin: 6px 0 12px 0;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+.ci-connectivity-stats .ci-stats-row {
+  display: contents;
+}
+.ci-connectivity-stats .ci-stats-label {
+  color: var(--text-muted);
+}
+.ci-connectivity-stats .ci-stats-val {
+  color: var(--text-normal);
+  text-align: right;
+}
+.ci-connectivity-stats h4 {
+  margin: 12px 0 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 /* CM6 Live Preview widget path — inherits .customize-icons-link-icon spacing
    but stays inline-block so it doesn't affect line height. */
 .ci-live-preview-widget {
@@ -218,7 +252,7 @@
 
 .graph-banner-content {
   width: auto;
-  height: var(--banner-height, 20vh) !important;
+  height: var(--banner-height, 24vh) !important;
   margin-block-end: var(--banner-margin-bottom);
   border: 2px solid transparent;
 }
@@ -238,12 +272,59 @@
   display: none;
 }
 
+/* Belt-and-suspenders: hide the transient localgraph tab header so
+   the tab bar doesn't shift while the banner is being set up. Without
+   this, clicking a tab during the ~100ms setup lands on a different
+   tab because tabs shifted right when the transient tab appeared. */
+.workspace-tab-header[data-ci-transient="1"] {
+  display: none !important;
+}
+
+/* Native graph-controls panel stays visible so users can toggle filters,
+   depth, forces, etc. from inside the banner. Keep it collapsed by default
+   (setupNode calls toggleClass("is-close", true)). Force top-right anchor
+   so it aligns with our re-center button below it. */
+.graph-banner-content .graph-controls {
+  top: 6px !important;
+  right: 6px !important;
+  left: auto !important;
+}
+
+/* Re-center button — top-right of the banner, below Obsidian's native
+   gear (graph-controls), only visible on hover. */
+.graph-banner-recenter {
+  position: absolute;
+  top: 40px;
+  right: 6px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms;
+}
+.graph-banner-content:hover .graph-banner-recenter,
+.graph-banner-content[data-interactive="true"] .graph-banner-recenter {
+  opacity: 1;
+}
+.graph-banner-recenter:hover {
+  color: var(--text-normal);
+  border-color: var(--color-accent);
+}
+
 /* Prevents layout shift when the banner is about to appear */
 .inline-title:not(.markdown-embed-content .inline-title):not(
   :has(+ .graph-banner-content)
 ) {
   margin-block-end: calc(
-    var(--banner-height, 20vh) + var(--banner-margin-bottom)
+    var(--banner-height, 24vh) + var(--banner-margin-bottom)
       + var(--inline-title-margin-bottom)
   );
 }
