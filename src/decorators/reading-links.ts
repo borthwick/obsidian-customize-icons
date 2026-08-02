@@ -36,8 +36,19 @@ export async function insertLinkIcon(
   iconConfig: FolderIcon,
   surface: ConnectivitySurface = "links",
 ): Promise<void> {
+  // Idempotency check + synchronous claim BEFORE any await. Post-processors
+  // can fire the same element twice in rapid succession; without a synchronous
+  // marker both calls pass the DOM check while loadSvg awaits, then both
+  // insert — doubled icons on the link.
+  if (link.querySelector(":scope > .customize-icons-link-icon")) return;
+  if (link.dataset.ciProcessed === "1") return;
+  link.dataset.ciProcessed = "1";
+
   const parsed = parseIconId(iconConfig.icon);
-  if (!parsed) return;
+  if (!parsed) {
+    delete link.dataset.ciProcessed;
+    return;
+  }
 
   const span = document.createElement("span");
   span.classList.add("customize-icons-link-icon");

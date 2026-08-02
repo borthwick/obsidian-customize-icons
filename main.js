@@ -740,9 +740,16 @@ function processReadingModeLinks(plugin, el, ctx) {
   }
 }
 async function insertLinkIcon(plugin, link, filePath, iconConfig, surface = "links") {
-  const parsed = parseIconId(iconConfig.icon);
-  if (!parsed)
+  if (link.querySelector(":scope > .customize-icons-link-icon"))
     return;
+  if (link.dataset.ciProcessed === "1")
+    return;
+  link.dataset.ciProcessed = "1";
+  const parsed = parseIconId(iconConfig.icon);
+  if (!parsed) {
+    delete link.dataset.ciProcessed;
+    return;
+  }
   const span = document.createElement("span");
   span.classList.add("customize-icons-link-icon");
   const qualityInfo = plugin.getQualityColorInfo(filePath, surface);
