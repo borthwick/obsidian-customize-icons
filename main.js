@@ -457,7 +457,8 @@ var DEFAULT_CONNECTIVITY_TOGGLES = {
 var DEFAULT_GRAPH_BANNER = {
   enable: false,
   ignore: [],
-  timeToRemoveLeaf: 100
+  timeToRemoveLeaf: 100,
+  lazyRender: true
 };
 var DEFAULT_SETTINGS = {
   showInTabs: true,
@@ -543,9 +544,6 @@ function setBundledIcons(icons) {
 }
 function getBundledIcons() {
   return BUNDLED_ICONS;
-}
-function getIconIndex() {
-  return iconIndex;
 }
 function parseIconId(id) {
   if (!id)
@@ -769,6 +767,7 @@ async function insertLinkIcon(plugin, link, filePath, iconConfig, surface = "lin
     span.appendChild(iconEl);
   }
   link.insertBefore(span, link.firstChild);
+  link.insertBefore(document.createTextNode("\u2060"), span.nextSibling);
 }
 
 // src/decorators/file-explorer.ts
@@ -1343,7 +1342,7 @@ var _GraphBannerView = class {
       if (container) {
         if (this.isDescendantOf(container)) {
           this.kickCanvas();
-          setTimeout(() => this.recenter(), 600);
+          this.scheduleAutoRecenter();
           return;
         }
         const inlineTitle = container.querySelector(".inline-title");
@@ -1351,7 +1350,7 @@ var _GraphBannerView = class {
           inlineTitle.parentElement.insertBefore(this.node, inlineTitle.nextSibling);
           this.installRecenterButton();
           this.kickCanvas();
-          setTimeout(() => this.recenter(), 600);
+          this.scheduleAutoRecenter();
           return;
         }
       }
@@ -1359,16 +1358,20 @@ var _GraphBannerView = class {
     }
   }
   scheduleAutoRecenter() {
+    for (const delay of [200, 900, 2200]) {
+      setTimeout(() => {
+        this.recenter();
+      }, delay);
+    }
     setTimeout(() => {
-      this.recenter();
-      this.recoverIfEmpty();
-    }, 600);
+      this.recoverIfEmpty(0);
+    }, 900);
   }
   // If the renderer has zero nodes after settling, the setViewState / retarget
-  // silently failed (happens on very large local graphs). Recycle the leaf:
-  // set to empty view, then back to localgraph with the target file. This
-  // rebuilds the view fresh.
-  recoverIfEmpty() {
+  // silently failed (happens on large graphs, or wiki source pages that
+  // Obsidian's metadata cache hasn't indexed yet). Recycle the leaf and
+  // retry with backoff — up to 3 attempts spaced 500/1200/2500ms out.
+  recoverIfEmpty(attempt) {
     var _a, _b;
     const view = this.leaf.view;
     const nodes = (_a = view == null ? void 0 : view.renderer) == null ? void 0 : _a.nodes;
@@ -1376,6 +1379,8 @@ var _GraphBannerView = class {
       return;
     const filePath = (_b = view == null ? void 0 : view.file) == null ? void 0 : _b.path;
     if (!filePath)
+      return;
+    if (attempt >= 3)
       return;
     (async () => {
       try {
@@ -1385,7 +1390,10 @@ var _GraphBannerView = class {
           state: { file: filePath }
         });
         this.kickCanvas();
-        setTimeout(() => this.recenter(), 500);
+        setTimeout(() => {
+          this.recenter();
+          this.recoverIfEmpty(attempt + 1);
+        }, 500 + attempt * 700);
       } catch (e) {
       }
     })();
@@ -1632,6 +1640,30 @@ var GraphBannerManager = class {
     this.inFlight.clear();
     this.paneFile.clear();
   }
+  /**
+   * True if a banner is currently mounted in this pane AND it's targeting the
+   * given file path. Lazy mode uses this to leave revealed banners alone when
+   * a follow-up layout-change fires for the same file.
+   */
+  paneShowsFile(paneEl, filePath) {
+    if (this.paneFile.get(paneEl) !== filePath)
+      return false;
+    return this.graphViews.some((v) => v.isDescendantOf(paneEl));
+  }
+  /**
+   * Detach any banner in the given pane. Used by lazy mode when the file
+   * changes: the old banner (mounted for a different file) is torn down so
+   * a fresh placeholder can be inserted for the new file.
+   */
+  detachInPane(paneEl) {
+    const idx = this.graphViews.findIndex((v) => v.isDescendantOf(paneEl));
+    if (idx >= 0) {
+      this.graphViews[idx].detach();
+      this.graphViews.splice(idx, 1);
+    }
+    this.paneFile.delete(paneEl);
+    this.inFlight.delete(paneEl);
+  }
 };
 
 // src/graph-banner/ignore-matcher.ts
@@ -1764,6 +1796,154 @@ function syncColorGroupsToGraphPlugin(app, settings) {
   return ours;
 }
 
+// src/graph-banner/placeholder.ts
+var VY_STAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="12" cy="12" r="3"/><path d="M12 3 c 0 3 0 5 0 6"/><path d="M12 15 c 0 3 0 5 0 6"/><path d="M3 12 c 3 0 5 0 6 0"/><path d="M15 12 c 3 0 5 0 6 0"/><path d="M6 6 c 1.5 1.5 3 3 4 4"/><path d="M14 14 c 1.5 1.5 3 3 4 4"/><path d="M18 6 c -1.5 1.5 -3 3 -4 4"/><path d="M10 14 c -1.5 1.5 -3 3 -4 4"/><circle cx="12" cy="3" r="0.6" fill="currentColor" stroke="none"/><circle cx="12" cy="21" r="0.6" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="0.6" fill="currentColor" stroke="none"/><circle cx="21" cy="12" r="0.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="0.7" fill="currentColor" stroke="none"/></svg>`;
+var _GraphBannerPlaceholder = class {
+  /**
+   * Idempotent: insert (or update) a placeholder button in the view's header.
+   * If a real banner is already mounted in this view, do nothing — the user
+   * has already opted in for this file.
+   */
+  static async ensureIn(view, onReveal) {
+    const mode = view.getMode();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const container = view.containerEl.find(
+        `.markdown-${mode}-view`
+      );
+      if (container) {
+        if (container.querySelector(".graph-banner-content"))
+          return;
+        const existing = container.querySelector(
+          "." + _GraphBannerPlaceholder.nodeClass
+        );
+        if (existing) {
+          existing.onclick = (ev) => {
+            ev.stopPropagation();
+            existing.remove();
+            onReveal();
+          };
+          return;
+        }
+        const inlineTitle = container.querySelector(".inline-title");
+        if (inlineTitle) {
+          const btn = document.createElement("button");
+          btn.classList.add(_GraphBannerPlaceholder.nodeClass);
+          btn.setAttribute("type", "button");
+          btn.setAttribute("aria-label", "Show local graph for this note");
+          btn.innerHTML = VY_STAR_SVG;
+          btn.onclick = (ev) => {
+            ev.stopPropagation();
+            btn.remove();
+            onReveal();
+          };
+          inlineTitle.appendChild(btn);
+          return;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  /** Remove any placeholder inside this view (used when detaching). */
+  static removeFrom(view) {
+    const nodes = view.containerEl.querySelectorAll(
+      "." + _GraphBannerPlaceholder.nodeClass
+    );
+    nodes.forEach((n) => {
+      var _a;
+      return (_a = n.parentElement) == null ? void 0 : _a.removeChild(n);
+    });
+  }
+  /** Sweep every placeholder in the document. Used on plugin unload. */
+  static removeAll() {
+    document.querySelectorAll("." + _GraphBannerPlaceholder.nodeClass).forEach((n) => {
+      var _a;
+      return (_a = n.parentElement) == null ? void 0 : _a.removeChild(n);
+    });
+  }
+};
+var GraphBannerPlaceholder = _GraphBannerPlaceholder;
+GraphBannerPlaceholder.nodeClass = "graph-banner-placeholder";
+
+// src/logger.ts
+var LOG_PATH = "debug.log";
+var LOG_ROTATED_PATH = "debug.log.1";
+var MAX_BYTES = 2 * 1024 * 1024;
+var ErrorLogger = class {
+  constructor(app) {
+    this.currentSize = 0;
+    this.installed = false;
+    this.app = app;
+    this.originalConsoleError = console.error.bind(console);
+    this.errorHandler = (ev) => {
+      this.write("error", `${ev.message}
+${ev.error && ev.error.stack || ""}`);
+    };
+    this.rejectionHandler = (ev) => {
+      const reason = ev.reason;
+      const msg = reason && reason.stack ? reason.stack : String(reason);
+      this.write("unhandledRejection", msg);
+    };
+  }
+  async install() {
+    var _a;
+    if (this.installed)
+      return;
+    this.installed = true;
+    try {
+      const existing = await this.app.vault.adapter.exists(LOG_PATH);
+      if (existing) {
+        const stat = await this.app.vault.adapter.stat(LOG_PATH);
+        this.currentSize = (_a = stat == null ? void 0 : stat.size) != null ? _a : 0;
+      }
+    } catch (e) {
+      this.currentSize = 0;
+    }
+    await this.write("session", `logger installed at ${new Date().toISOString()}`);
+    const orig = this.originalConsoleError;
+    const self = this;
+    console.error = function(...args) {
+      try {
+        const msg = args.map((a) => a instanceof Error ? `${a.message}
+${a.stack || ""}` : String(a)).join(" ");
+        void self.write("console.error", msg);
+      } catch (e) {
+      }
+      orig(...args);
+    };
+    window.addEventListener("error", this.errorHandler);
+    window.addEventListener("unhandledrejection", this.rejectionHandler);
+  }
+  uninstall() {
+    if (!this.installed)
+      return;
+    this.installed = false;
+    console.error = this.originalConsoleError;
+    window.removeEventListener("error", this.errorHandler);
+    window.removeEventListener("unhandledrejection", this.rejectionHandler);
+  }
+  async write(kind, msg) {
+    const ts = new Date().toISOString();
+    const line = `[${ts}] [${kind}] ${msg}
+`;
+    try {
+      if (this.currentSize + line.length > MAX_BYTES) {
+        try {
+          if (await this.app.vault.adapter.exists(LOG_ROTATED_PATH)) {
+            await this.app.vault.adapter.remove(LOG_ROTATED_PATH);
+          }
+          await this.app.vault.adapter.rename(LOG_PATH, LOG_ROTATED_PATH);
+        } catch (e) {
+        }
+        this.currentSize = 0;
+      }
+      await this.app.vault.adapter.append(LOG_PATH, line);
+      this.currentSize += line.length;
+    } catch (e) {
+      this.originalConsoleError("[ErrorLogger] write failed:", e);
+    }
+  }
+};
+
 // src/settings.ts
 var import_obsidian4 = require("obsidian");
 
@@ -1841,20 +2021,6 @@ var IconPickerModal = class extends import_obsidian3.Modal {
         }
       }
     } catch (e) {
-    }
-    for (const entry of getIconIndex()) {
-      if (seen.has(entry.id))
-        continue;
-      const svg = await loadSvg(
-        this.app.vault.adapter,
-        this.plugin.settings.iconPacksPath,
-        entry.pack,
-        entry.name
-      );
-      if (!svg || svg.length <= 50)
-        continue;
-      this.allIcons.push({ id: entry.id, svg });
-      seen.add(entry.id);
     }
     this.allIcons.sort((a, b) => a.id.localeCompare(b.id));
     this.renderGrid(gridContainer, this.allIcons);
@@ -2154,6 +2320,15 @@ var CustomizeIconsSettingTab = class extends import_obsidian4.PluginSettingTab {
         new import_obsidian4.Notice("Graph banner toggled \u2014 reload the app to apply.");
       })
     );
+    new import_obsidian4.Setting(el).setName("Lazy render (default on)").setDesc(
+      "When on, no graph is rendered until you click the 'Show graph' button in the note header. Much faster on large vaults. Turn off for eager auto-render on every note open."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.graphBanner.lazyRender).onChange(async (val) => {
+        this.plugin.settings.graphBanner = { ...this.plugin.settings.graphBanner, lazyRender: val };
+        await this.plugin.saveSettings();
+        new import_obsidian4.Notice("Lazy render toggled \u2014 reload the app to apply.");
+      })
+    );
     new import_obsidian4.Setting(el).setName("Ignored path pattern").setDesc(
       "Manage notes which do not display the graph banner. This pattern follows .gitignore spec."
     ).addTextArea(
@@ -2338,9 +2513,12 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
     this._decorating = false;
     this._basesObservers = /* @__PURE__ */ new Map();
     this.graphBannerManager = null;
+    this.errorLogger = null;
   }
   async onload() {
     await this.loadSettings();
+    this.errorLogger = new ErrorLogger(this.app);
+    await this.errorLogger.install();
     setBundledIcons(await this.loadBundledIcons());
     if (Object.keys(this.settings.folderIcons).length === 0) {
       this.settings.folderIcons = Object.assign({}, DEFAULT_FOLDER_ICONS);
@@ -2390,11 +2568,20 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       syncColorGroupsToGraphPlugin(this.app, this.settings);
     });
     if (this.settings.graphBanner.enable) {
-      document.querySelectorAll(".graph-banner-content").forEach((el) => {
+      document.querySelectorAll(".graph-banner-content, .graph-banner-placeholder").forEach((el) => {
         var _a;
         return (_a = el.parentElement) == null ? void 0 : _a.removeChild(el);
       });
       this.graphBannerManager = new GraphBannerManager(this.settings.graphBanner.timeToRemoveLeaf);
+      const handleView = async (view) => {
+        if (!view || !view.file || view.file.extension !== "md")
+          return;
+        if (this.settings.graphBanner.lazyRender) {
+          await this.showGraphPlaceholder(view);
+        } else {
+          await this.placeGraphBanner(view);
+        }
+      };
       this.registerEvent(
         this.app.workspace.on("file-open", async (file) => {
           if (!file || file.extension !== "md")
@@ -2402,14 +2589,13 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
           const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
           if (!view || view.file !== file)
             return;
-          await this.placeGraphBanner(view);
+          await handleView(view);
         })
       );
       this.registerEvent(
         this.app.workspace.on("layout-change", async () => {
           const v = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-          if (v && v.file)
-            await this.placeGraphBanner(v);
+          await handleView(v);
         })
       );
       this.registerEvent(
@@ -2417,21 +2603,23 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
           if (!leaf)
             return;
           const v = leaf.view;
-          if (v && v.file && v.file.extension === "md")
-            await this.placeGraphBanner(v);
+          await handleView(v);
         })
       );
       this.app.workspace.onLayoutReady(async () => {
         for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
           const v = leaf.view;
-          if (v && v.file)
-            await this.placeGraphBanner(v);
+          await handleView(v);
         }
       });
     }
-    new import_obsidian5.Notice("Customize Icons v1.7.0 loaded");
+    new import_obsidian5.Notice("Customize Icons v1.7.10 loaded (icon+text no-wrap glue)");
   }
   onunload() {
+    if (this.errorLogger) {
+      this.errorLogger.uninstall();
+      this.errorLogger = null;
+    }
     if (this.graphBannerManager) {
       this.graphBannerManager.detachAll();
       this.graphBannerManager = null;
@@ -2440,6 +2628,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       var _a;
       return (_a = el.parentElement) == null ? void 0 : _a.removeChild(el);
     });
+    GraphBannerPlaceholder.removeAll();
     if (this._basesObservers) {
       this._basesObservers.forEach((obs) => obs.disconnect());
       this._basesObservers.clear();
@@ -2566,6 +2755,40 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
     await this.graphBannerManager.placeGraphView(this.app, view, matcher, {
       ...opts,
       colorGroups
+    });
+  }
+  /**
+   * Lazy-mode entry point. Behavior by state:
+   *   - Ignored path: remove both placeholder and any banner in the pane.
+   *   - Banner already mounted FOR THIS FILE: leave it alone (user revealed
+   *     it; a follow-up layout-change must not stomp their choice).
+   *   - Banner mounted for a DIFFERENT file: detach it (previous file), then
+   *     insert placeholder for the new file.
+   *   - No banner: ensure placeholder is present.
+   */
+  async showGraphPlaceholder(view) {
+    var _a;
+    if (!this.graphBannerManager)
+      return;
+    const paneEl = view.containerEl;
+    const filePath = (_a = view.file) == null ? void 0 : _a.path;
+    if (!filePath)
+      return;
+    const matcher = new IgnoreMatcher().add(this.settings.graphBanner.ignore);
+    if (matcher.test(filePath)) {
+      GraphBannerPlaceholder.removeFrom(view);
+      this.graphBannerManager.detachInPane(paneEl);
+      return;
+    }
+    if (this.graphBannerManager.paneShowsFile(paneEl, filePath)) {
+      GraphBannerPlaceholder.removeFrom(view);
+      return;
+    }
+    if (paneEl.querySelector(".graph-banner-content")) {
+      this.graphBannerManager.detachInPane(paneEl);
+    }
+    await GraphBannerPlaceholder.ensureIn(view, () => {
+      void this.placeGraphBanner(view, { forceFresh: true });
     });
   }
   async rebuildIconBundle() {

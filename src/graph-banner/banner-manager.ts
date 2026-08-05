@@ -108,4 +108,29 @@ export class GraphBannerManager {
     this.inFlight.clear();
     this.paneFile.clear();
   }
+
+  /**
+   * True if a banner is currently mounted in this pane AND it's targeting the
+   * given file path. Lazy mode uses this to leave revealed banners alone when
+   * a follow-up layout-change fires for the same file.
+   */
+  paneShowsFile(paneEl: Element, filePath: string): boolean {
+    if (this.paneFile.get(paneEl) !== filePath) return false;
+    return this.graphViews.some((v) => v.isDescendantOf(paneEl));
+  }
+
+  /**
+   * Detach any banner in the given pane. Used by lazy mode when the file
+   * changes: the old banner (mounted for a different file) is torn down so
+   * a fresh placeholder can be inserted for the new file.
+   */
+  detachInPane(paneEl: Element): void {
+    const idx = this.graphViews.findIndex((v) => v.isDescendantOf(paneEl));
+    if (idx >= 0) {
+      this.graphViews[idx].detach();
+      this.graphViews.splice(idx, 1);
+    }
+    this.paneFile.delete(paneEl);
+    this.inFlight.delete(paneEl);
+  }
 }

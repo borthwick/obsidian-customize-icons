@@ -378,6 +378,19 @@ export class CustomizeIconsSettingTab extends PluginSettingTab {
       );
 
     new Setting(el)
+      .setName("Lazy render (default on)")
+      .setDesc(
+        "When on, no graph is rendered until you click the 'Show graph' button in the note header. Much faster on large vaults. Turn off for eager auto-render on every note open.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.graphBanner.lazyRender).onChange(async (val) => {
+          this.plugin.settings.graphBanner = { ...this.plugin.settings.graphBanner, lazyRender: val };
+          await this.plugin.saveSettings();
+          new Notice("Lazy render toggled — reload the app to apply.");
+        }),
+      );
+
+    new Setting(el)
       .setName("Ignored path pattern")
       .setDesc(
         "Manage notes which do not display the graph banner. This pattern follows .gitignore spec.",

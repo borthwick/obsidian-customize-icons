@@ -95,20 +95,13 @@ export class IconPickerModal extends Modal {
       }
     } catch (e) {}
 
-    // 3. Pack subfolders (voynich-icons, tabler-icons, etc.) — merge from
-    // iconIndex which was built at plugin startup. Load SVGs on demand.
-    for (const entry of getIconIndex()) {
-      if (seen.has(entry.id)) continue;
-      const svg = await loadSvg(
-        this.app.vault.adapter,
-        this.plugin.settings.iconPacksPath,
-        entry.pack,
-        entry.name,
-      );
-      if (!svg || svg.length <= 50) continue;
-      this.allIcons.push({ id: entry.id, svg });
-      seen.add(entry.id);
-    }
+    // Pack-subfolder preload REMOVED — was awaiting loadSvg for every
+    // icon in every pack (coolicons, tabler, lucide, boxicons... often 5000+
+    // total), blocking the picker's initial render. Users can still type a
+    // pack icon ID (e.g., "LiBook", "OcPerson24") directly into the folder's
+    // "Icon ID or emoji" input; loadSvg resolves it via pack subfolders at
+    // decoration time. This picker grid only previews bundle + flat
+    // customize-icons/ folder (fast, both are already in memory).
 
     this.allIcons.sort((a, b) => a.id.localeCompare(b.id));
 

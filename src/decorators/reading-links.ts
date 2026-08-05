@@ -71,4 +71,8 @@ export async function insertLinkIcon(
   }
 
   link.insertBefore(span, link.firstChild);
+  // Word joiner (U+2060): tells the layout engine "do not break between icon
+  // and the following text". Without this, the link can wrap between the
+  // icon and the first character, leaving a stray icon on its own line.
+  link.insertBefore(document.createTextNode("⁠"), span.nextSibling);
 }

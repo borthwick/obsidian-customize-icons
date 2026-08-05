@@ -28,6 +28,8 @@ import { warmSvg } from "./live-preview/svg-cache";
 import { GraphBannerManager } from "./graph-banner/banner-manager";
 import { IgnoreMatcher } from "./graph-banner/ignore-matcher";
 import { syncColorGroupsToGraphPlugin } from "./graph-banner/color-groups";
+import { GraphBannerPlaceholder } from "./graph-banner/placeholder";
+import { ErrorLogger } from "./logger";
 import { CustomizeIconsSettingTab } from "./settings";
 
 export default class CustomizeIconsPlugin extends Plugin {
@@ -36,9 +38,16 @@ export default class CustomizeIconsPlugin extends Plugin {
   _decorating: boolean = false;
   _basesObservers: Map<Element, MutationObserver> = new Map();
   graphBannerManager: GraphBannerManager | null = null;
+  errorLogger: ErrorLogger | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    // Persistent error logger — installs FIRST so it catches errors from all
+    // other subsystem loads. Writes to `debug.log` at vault root; rotates at
+    // 2 MB. See src/logger.ts.
+    this.errorLogger = new ErrorLogger(this.app);
+    await this.errorLogger.install();
 
     // Load bundled icons and expose them to icons/index.ts
     setBundledIcons(await this.loadBundledIcons());
@@ -120,22 +129,32 @@ export default class CustomizeIconsPlugin extends Plugin {
 
     // Graph banner subsystem — opt-in via graphBanner.enable.
     if (this.settings.graphBanner.enable) {
-      // Sweep any orphan banner nodes left by a previous plugin instance or
-      // Obsidian reload. Prevents the "N stacked gears on reload" bug.
+      // Sweep any orphan banner + placeholder nodes left by a previous plugin
+      // instance or Obsidian reload. Prevents the "N stacked gears on reload"
+      // bug (banners) and stale button leftovers (placeholders).
       document
-        .querySelectorAll(".graph-banner-content")
+        .querySelectorAll(".graph-banner-content, .graph-banner-placeholder")
         .forEach((el) => el.parentElement?.removeChild(el));
       this.graphBannerManager = new GraphBannerManager(this.settings.graphBanner.timeToRemoveLeaf);
+
+      // In lazy mode we insert a "Show graph" button per note instead of
+      // rendering the banner up front. Same event wiring; different action.
+      const handleView = async (view: MarkdownView | null | undefined) => {
+        if (!view || !view.file || view.file.extension !== "md") return;
+        if (this.settings.graphBanner.lazyRender) {
+          await this.showGraphPlaceholder(view);
+        } else {
+          // Eager mode preserved for users who want the old behavior.
+          await this.placeGraphBanner(view);
+        }
+      };
 
       this.registerEvent(
         this.app.workspace.on("file-open", async (file: TFile | null) => {
           if (!file || file.extension !== "md") return;
           const view = this.app.workspace.getActiveViewOfType(MarkdownView);
           if (!view || view.file !== file) return;
-          // No forceFresh — the manager reuses the pane's existing banner
-          // via retargetTo() so we don't open a fresh graph tab (which
-          // steals focus) on every navigation.
-          await this.placeGraphBanner(view);
+          await handleView(view);
         }),
       );
 
@@ -147,7 +166,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       this.registerEvent(
         this.app.workspace.on("layout-change", async () => {
           const v = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (v && v.file) await this.placeGraphBanner(v);
+          await handleView(v);
         }),
       );
 
@@ -157,22 +176,27 @@ export default class CustomizeIconsPlugin extends Plugin {
         this.app.workspace.on("active-leaf-change", async (leaf) => {
           if (!leaf) return;
           const v = leaf.view as MarkdownView;
-          if (v && v.file && v.file.extension === "md") await this.placeGraphBanner(v);
+          await handleView(v);
         }),
       );
 
       this.app.workspace.onLayoutReady(async () => {
         for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
           const v = leaf.view as MarkdownView;
-          if (v && v.file) await this.placeGraphBanner(v);
+          await handleView(v);
         }
       });
     }
 
-    new Notice("Customize Icons v1.7.0 loaded");
+    new Notice("Customize Icons v1.7.10 loaded (icon+text no-wrap glue)");
   }
 
   onunload(): void {
+    // Uninstall error logger first so it stops holding references.
+    if (this.errorLogger) {
+      this.errorLogger.uninstall();
+      this.errorLogger = null;
+    }
     // Detach graph-banner views (removes their DOM nodes)
     if (this.graphBannerManager) {
       this.graphBannerManager.detachAll();
@@ -184,6 +208,8 @@ export default class CustomizeIconsPlugin extends Plugin {
     document
       .querySelectorAll(".graph-banner-content")
       .forEach((el) => el.parentElement?.removeChild(el));
+    // Also sweep any placeholder buttons.
+    GraphBannerPlaceholder.removeAll();
     // Disconnect Bases observers
     if (this._basesObservers) {
       this._basesObservers.forEach((obs) => obs.disconnect());
@@ -343,6 +369,46 @@ export default class CustomizeIconsPlugin extends Plugin {
     await this.graphBannerManager.placeGraphView(this.app, view, matcher, {
       ...opts,
       colorGroups,
+    });
+  }
+
+  /**
+   * Lazy-mode entry point. Behavior by state:
+   *   - Ignored path: remove both placeholder and any banner in the pane.
+   *   - Banner already mounted FOR THIS FILE: leave it alone (user revealed
+   *     it; a follow-up layout-change must not stomp their choice).
+   *   - Banner mounted for a DIFFERENT file: detach it (previous file), then
+   *     insert placeholder for the new file.
+   *   - No banner: ensure placeholder is present.
+   */
+  async showGraphPlaceholder(view: MarkdownView): Promise<void> {
+    if (!this.graphBannerManager) return;
+    const paneEl = view.containerEl;
+    const filePath = view.file?.path;
+    if (!filePath) return;
+    // Skip files matching the user's ignore list — same policy as the banner.
+    const matcher = new IgnoreMatcher().add(this.settings.graphBanner.ignore);
+    if (matcher.test(filePath)) {
+      GraphBannerPlaceholder.removeFrom(view);
+      this.graphBannerManager.detachInPane(paneEl);
+      return;
+    }
+    // If the banner in this pane already matches this file, the user has
+    // already revealed it — don't touch it. Follow-up layout-change events
+    // otherwise cause the placeholder to reappear and stomp the graph.
+    if (this.graphBannerManager.paneShowsFile(paneEl, filePath)) {
+      GraphBannerPlaceholder.removeFrom(view);
+      return;
+    }
+    // Banner exists but for a different file — tear it down before inserting
+    // a fresh placeholder for this file.
+    if (paneEl.querySelector(".graph-banner-content")) {
+      this.graphBannerManager.detachInPane(paneEl);
+    }
+    await GraphBannerPlaceholder.ensureIn(view, () => {
+      // Reveal: fire the existing placement path. forceFresh so any stale
+      // banner state in the manager is rebuilt for this file specifically.
+      void this.placeGraphBanner(view, { forceFresh: true });
     });
   }
 

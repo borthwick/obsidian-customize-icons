@@ -126,7 +126,7 @@ export class GraphBannerView {
       if (container) {
         if (this.isDescendantOf(container)) {
           this.kickCanvas();
-          setTimeout(() => this.recenter(), 600);
+          this.scheduleAutoRecenter();
           return;
         }
         const inlineTitle = container.querySelector(".inline-title") as HTMLElement | null;
@@ -134,9 +134,7 @@ export class GraphBannerView {
           inlineTitle.parentElement.insertBefore(this.node, inlineTitle.nextSibling);
           this.installRecenterButton();
           this.kickCanvas();
-          // Auto-recenter after force layout has time to settle. Fixes
-          // large graphs (Camp Demo Day etc.) that render off-viewport.
-          setTimeout(() => this.recenter(), 600);
+          this.scheduleAutoRecenter();
           return;
         }
       }
@@ -145,22 +143,31 @@ export class GraphBannerView {
   }
 
   private scheduleAutoRecenter(): void {
+    // Recenter three times as the graph settles. Big vaults can take >600ms
+    // for the renderer to have real nodes; a single fire lands too early and
+    // leaves the graph off-center. 200ms / 900ms / 2200ms covers small notes,
+    // medium graphs, and the initial cold-render on a 36k-file vault.
+    for (const delay of [200, 900, 2200]) {
+      setTimeout(() => {
+        this.recenter();
+      }, delay);
+    }
     setTimeout(() => {
-      this.recenter();
-      this.recoverIfEmpty();
-    }, 600);
+      this.recoverIfEmpty(0);
+    }, 900);
   }
 
   // If the renderer has zero nodes after settling, the setViewState / retarget
-  // silently failed (happens on very large local graphs). Recycle the leaf:
-  // set to empty view, then back to localgraph with the target file. This
-  // rebuilds the view fresh.
-  private recoverIfEmpty(): void {
+  // silently failed (happens on large graphs, or wiki source pages that
+  // Obsidian's metadata cache hasn't indexed yet). Recycle the leaf and
+  // retry with backoff — up to 3 attempts spaced 500/1200/2500ms out.
+  private recoverIfEmpty(attempt: number): void {
     const view = this.leaf.view as any;
     const nodes = view?.renderer?.nodes;
     if (nodes && nodes.length > 0) return; // healthy
     const filePath = view?.file?.path;
     if (!filePath) return;
+    if (attempt >= 3) return;
     (async () => {
       try {
         await this.leaf.setViewState({ type: "empty" });
@@ -169,7 +176,10 @@ export class GraphBannerView {
           state: { file: filePath },
         });
         this.kickCanvas();
-        setTimeout(() => this.recenter(), 500);
+        setTimeout(() => {
+          this.recenter();
+          this.recoverIfEmpty(attempt + 1);
+        }, 500 + attempt * 700);
       } catch (e) {}
     })();
   }

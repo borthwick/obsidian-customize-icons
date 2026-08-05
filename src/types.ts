@@ -19,6 +19,10 @@ export interface GraphBannerSubsettings {
   enable: boolean;
   ignore: string[];
   timeToRemoveLeaf: number;
+  // When true (default), banner is not rendered on file-open. A small "Show
+  // graph" button appears in the note header instead; clicking it mounts the
+  // banner for that file. Reduces per-open cost on large vaults.
+  lazyRender: boolean;
 }
 
 export interface CustomizeIconsSettings {
@@ -100,6 +104,7 @@ export const DEFAULT_GRAPH_BANNER: GraphBannerSubsettings = {
   enable: false,
   ignore: [],
   timeToRemoveLeaf: 100,
+  lazyRender: true,
 };
 
 export const DEFAULT_SETTINGS: CustomizeIconsSettings = {
