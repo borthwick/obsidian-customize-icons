@@ -42,7 +42,9 @@ export async function addTitleIcon(
     if (!svg) return;
     const qualityInfo = plugin.getQualityColorInfo(view.file.path, "title");
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+    span.appendChild(
+      createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
+    );
   }
 
   titleContainer.parentElement.insertBefore(span, titleContainer);

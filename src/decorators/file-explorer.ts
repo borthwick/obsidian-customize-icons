@@ -72,9 +72,11 @@ export async function decorateFileExplorer(plugin: CustomizeIconsPlugin): Promis
         const qualityInfo =
           item.file instanceof TFile
             ? plugin.getQualityColorInfo(item.file.path, "fileExplorer")
-            : { color: null, cssClass: null };
+            : { color: null, cssClass: null, ringColor: null };
         const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-        span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+        span.appendChild(
+          createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
+        );
       }
 
       titleRowEl.insertBefore(span, titleEl);

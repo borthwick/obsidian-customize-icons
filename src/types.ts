@@ -61,6 +61,10 @@ export interface IconIndexEntry {
 export interface QualityColorInfo {
   color: string | null;
   cssClass: string | null;
+  // When quality-high AND connectivity-high both apply on a surface, the
+  // fill color reflects the winning signal (quality) and this holds the
+  // secondary color used for the ring/halo. Null in every other case.
+  ringColor?: string | null;
 }
 
 // Map from icon id (e.g. "LiRocket") to raw SVG string.

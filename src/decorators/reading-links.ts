@@ -66,7 +66,7 @@ export async function insertLinkIcon(
     );
     if (!svg) return;
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    const iconEl = createIconElement(svg, color, qualityInfo.cssClass);
+    const iconEl = createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null);
     span.appendChild(iconEl);
   }
 

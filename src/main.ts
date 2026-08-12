@@ -9,6 +9,11 @@ import {
   DEFAULT_SETTINGS,
   QualityColorInfo,
 } from "./types";
+// Inlined at build time by esbuild's JSON loader. Shipping the icon bundle
+// inside main.js is how mobile gets icons — Obsidian Sync only replicates
+// main.js / manifest.json / styles.css / data.json for community plugins,
+// so a sibling icons-bundle.json never makes it to the phone. See v1.7.11.
+import bakedBundledIcons from "../icons-bundle.json";
 import { buildIconIndex, getBundledIcons, parseIconId, setBundledIcons } from "./icons/index";
 import { getQualityScore, invalidateQualityFor } from "./scoring/quality";
 import {
@@ -111,6 +116,26 @@ export default class CustomizeIconsPlugin extends Plugin {
       }),
     );
 
+    // Initial-paint safety net: onLayoutReady above fires before the metadata
+    // cache has finished parsing every file's frontmatter, so getQualityScore
+    // returns null for high-quality files and connectivity wins on every
+    // surface — the "Gary Marcus is purple in the explorer but green above
+    // the title" bug. When resolution completes, force a full re-run so the
+    // right signal wins. Also cover the case where we missed the initial
+    // "resolved" (subscribed after it fired) with a delayed pass.
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        invalidateConnectivity();
+        this.debouncedDecorate();
+      }),
+    );
+    this.app.workspace.onLayoutReady(() => {
+      setTimeout(() => {
+        invalidateConnectivity();
+        this.debouncedDecorate();
+      }, 2000);
+    });
+
     // Editor extension for Live Preview:
     // - editor-links: legacy <a class="internal-link"> DOM path (safe, always on)
     // - live-preview: CM6 Widget path for wikilink tokens (opt-in via
@@ -188,7 +213,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       });
     }
 
-    new Notice("Customize Icons v1.7.10 loaded (icon+text no-wrap glue)");
+    new Notice("Customize Icons v1.7.13 loaded (Vy icons baked in + rebuild fallback)");
   }
 
   onunload(): void {
@@ -228,15 +253,14 @@ export default class CustomizeIconsPlugin extends Plugin {
   }
 
   getQualityColorInfo(filePath: string, surface: ConnectivitySurface = "links"): QualityColorInfo {
-    // Quality high overrides everything
-    if (this.settings.enableQualityColoring) {
-      const score = getQualityScore(this.app, filePath);
-      if (score !== null && score >= this.settings.qualityHighThreshold) {
-        return { color: this.settings.qualityHighColor, cssClass: "ci-quality-high" };
-      }
-    }
+    // Evaluate both signals independently so we can detect the both-high case.
+    const qualityScore = this.settings.enableQualityColoring
+      ? getQualityScore(this.app, filePath)
+      : null;
+    const qualityHigh =
+      qualityScore !== null && qualityScore >= this.settings.qualityHighThreshold;
 
-    // Connectivity (skip files in penalty folders + surfaces disabled by toggle)
+    let connectivityHigh = false;
     if (
       this.settings.enableConnectivityColoring &&
       this.settings.connectivityToggles[surface] !== false
@@ -249,18 +273,27 @@ export default class CustomizeIconsPlugin extends Plugin {
       if (!inPenalty) {
         if (!isConnectivityBuilt()) buildConnectivityScores(this.app, this.settings);
         const conn = getConnectivityScore(filePath);
-        if (conn >= this.settings.connectivityThreshold) {
-          return { color: this.settings.connectivityColor, cssClass: "ci-connectivity" };
-        }
+        if (conn >= this.settings.connectivityThreshold) connectivityHigh = true;
       }
     }
 
+    if (qualityHigh && connectivityHigh) {
+      return {
+        color: this.settings.qualityHighColor,
+        cssClass: "ci-quality-high ci-both-high",
+        ringColor: this.settings.connectivityColor,
+      };
+    }
+    if (qualityHigh) {
+      return { color: this.settings.qualityHighColor, cssClass: "ci-quality-high" };
+    }
+    if (connectivityHigh) {
+      return { color: this.settings.connectivityColor, cssClass: "ci-connectivity" };
+    }
+
     // Quality exists (any value)
-    if (this.settings.enableQualityColoring) {
-      const score = getQualityScore(this.app, filePath);
-      if (score !== null) {
-        return { color: this.settings.qualityExistsColor, cssClass: "ci-quality-exists" };
-      }
+    if (this.settings.enableQualityColoring && qualityScore !== null) {
+      return { color: this.settings.qualityExistsColor, cssClass: "ci-quality-exists" };
     }
 
     return { color: null, cssClass: null };
@@ -302,13 +335,26 @@ export default class CustomizeIconsPlugin extends Plugin {
   }
 
   async loadBundledIcons(): Promise<BundledIcons> {
+    // Preference order:
+    //   1. runtime .obsidian/plugins/customize-icons/icons-bundle.json
+    //      (desktop; rebuilt via the "Rebuild icon bundle" command so users
+    //      can update icons without recompiling the plugin)
+    //   2. baked-in bundle imported at build time
+    //      (mobile; Obsidian Sync does NOT copy the sibling JSON)
+    //   3. live filesystem scan of iconPacksPath/customize-icons
+    //      (dev seed; also seeds the runtime JSON on first use)
     const bundlePath = ".obsidian/plugins/customize-icons/icons-bundle.json";
     try {
       if (await this.app.vault.adapter.exists(bundlePath)) {
         const data = await this.app.vault.adapter.read(bundlePath);
-        return JSON.parse(data);
+        const parsed = JSON.parse(data);
+        if (parsed && Object.keys(parsed).length > 0) return parsed;
       }
     } catch (e) {}
+
+    if (bakedBundledIcons && Object.keys(bakedBundledIcons).length > 0) {
+      return bakedBundledIcons as BundledIcons;
+    }
 
     // Fallback: scan the icons folder and build bundle
     const bundle: Record<string, string> = {};
@@ -416,6 +462,7 @@ export default class CustomizeIconsPlugin extends Plugin {
     const bundlePath = ".obsidian/plugins/customize-icons/icons-bundle.json";
     const bundle: Record<string, string> = {};
     const iconsPath = this.settings.iconPacksPath + "/customize-icons";
+    let scanFailed = false;
     try {
       const listing = await this.app.vault.adapter.list(iconsPath);
       if (listing && listing.files) {
@@ -427,13 +474,22 @@ export default class CustomizeIconsPlugin extends Plugin {
         }
       }
     } catch (e) {
-      console.error("[customize-icons] rebuildIconBundle scan failed", e);
-      throw e;
+      // Mobile has no raw SVG folder (it lives in the desktop's Dropbox
+      // mirror), so list() throws ENOENT. Fall back to the baked bundle
+      // rather than surfacing a red toast — Rebuild becomes "reset to what
+      // shipped with the plugin", which is the right mental model on mobile.
+      console.warn("[customize-icons] rebuildIconBundle scan failed; falling back to baked bundle", e);
+      scanFailed = true;
     }
-    await this.app.vault.adapter.write(bundlePath, JSON.stringify(bundle));
+    if (Object.keys(bundle).length === 0 && bakedBundledIcons) {
+      for (const k in bakedBundledIcons) bundle[k] = (bakedBundledIcons as any)[k];
+    }
+    try {
+      await this.app.vault.adapter.write(bundlePath, JSON.stringify(bundle));
+    } catch (e) {
+      if (!scanFailed) throw e;
+    }
     setBundledIcons(bundle);
-    // Also warm live-preview cache in case the new bundle unlocked icons
-    // referenced by folder assignments.
     if (this.settings.enableLivePreviewLinkIcons) await this.warmLivePreviewCache();
     return Object.keys(bundle).length;
   }

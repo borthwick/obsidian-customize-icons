@@ -35,14 +35,26 @@ export function createLivePreviewExtension(plugin: CustomizeIconsPlugin): Extens
         '<text x="0" y="12" font-size="12">' +
         escapeXml(emoji) +
         "</text></svg>";
-      return { svg, color: null, qualityClass: qualityInfo.cssClass, linkpath };
+      return {
+        svg,
+        color: null,
+        qualityClass: qualityInfo.cssClass,
+        ringColor: qualityInfo.ringColor || null,
+        linkpath,
+      };
     }
 
     // SVG path — must be synchronously available (cached during onload).
     const svg = getSvgSync(parsed.pack, parsed.name);
     if (!svg) return null;
 
-    return { svg, color, qualityClass: qualityInfo.cssClass, linkpath };
+    return {
+      svg,
+      color,
+      qualityClass: qualityInfo.cssClass,
+      ringColor: qualityInfo.ringColor || null,
+      linkpath,
+    };
   };
 
   return createLinkIconField(resolve);

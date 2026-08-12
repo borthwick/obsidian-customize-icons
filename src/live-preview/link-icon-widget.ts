@@ -6,6 +6,7 @@ export interface IconResolution {
   svg: string;
   color: string | null;
   qualityClass: string | null;
+  ringColor: string | null;
   linkpath: string;
 }
 
@@ -21,6 +22,7 @@ export class LinkIconWidget extends WidgetType {
       other.resolution.linkpath === this.resolution.linkpath &&
       other.resolution.color === this.resolution.color &&
       other.resolution.qualityClass === this.resolution.qualityClass &&
+      other.resolution.ringColor === this.resolution.ringColor &&
       other.resolution.svg === this.resolution.svg
     );
   }
@@ -39,7 +41,16 @@ export class LinkIconWidget extends WidgetType {
         (svg as SVGElement).style.stroke = color;
         (svg as SVGElement).style.color = color;
       }
-      if (this.resolution.qualityClass) svg.classList.add(this.resolution.qualityClass);
+      if (this.resolution.qualityClass) {
+        for (const cls of this.resolution.qualityClass.split(/\s+/).filter(Boolean)) {
+          svg.classList.add(cls);
+        }
+      }
+      if (this.resolution.ringColor) {
+        const r = this.resolution.ringColor;
+        (svg as SVGElement).style.filter =
+          `drop-shadow(0 0 0.75px ${r}) drop-shadow(0 0 0.75px ${r})`;
+      }
       (svg as SVGElement).style.pointerEvents = "none";
     }
     return span;

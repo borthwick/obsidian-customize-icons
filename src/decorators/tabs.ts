@@ -43,7 +43,9 @@ export async function decorateOpenTabs(plugin: CustomizeIconsPlugin): Promise<vo
       if (!svg) continue;
       const qualityInfo = plugin.getQualityColorInfo(file.path, "tabs");
       const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-      span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+      span.appendChild(
+        createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
+      );
     }
 
     titleEl.parentElement.insertBefore(span, titleEl);

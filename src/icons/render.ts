@@ -10,6 +10,7 @@ export function createIconElement(
   svgString: string | null,
   color: string | null,
   qualityClass: string | null,
+  ringColor: string | null = null,
 ): HTMLElement {
   const span = document.createElement("span");
   if (svgString) {
@@ -20,7 +21,15 @@ export function createIconElement(
         (svg as SVGElement).style.stroke = color;
         (svg as SVGElement).style.color = color;
       }
-      if (qualityClass) svg.classList.add(qualityClass);
+      if (qualityClass) {
+        for (const cls of qualityClass.split(/\s+/).filter(Boolean)) svg.classList.add(cls);
+      }
+      if (ringColor) {
+        // Two stacked drop-shadows give the ring enough opacity to read at
+        // 12-24px without adding a border element that would shift layout.
+        (svg as SVGElement).style.filter =
+          `drop-shadow(0 0 0.75px ${ringColor}) drop-shadow(0 0 0.75px ${ringColor})`;
+      }
     }
   }
   return span;
