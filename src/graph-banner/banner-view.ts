@@ -18,16 +18,32 @@ export class GraphBannerView {
     // Obsidian versions make the leaf returned by getLeaf("tab") active,
     // which hides the user's markdown pane and promotes the next tab to
     // the viewport — the "click placeholder → jumps to next tab, come
-    // back to an empty banner box" bug. We create the leaf, then
-    // immediately restore focus so the transient tab stays invisible
-    // in both the tab bar (CSS hide) and the workspace's activeLeaf.
+    // back to an empty banner box" bug.
+    //
+    // Restoring focus needs three fires (sync + microtask + next frame)
+    // because Obsidian's own tab-activation runs asynchronously AFTER
+    // getLeaf() returns — a single sync setActiveLeaf gets clobbered
+    // by whatever Obsidian schedules next.
     const previouslyActive = (app.workspace as any).activeLeaf as WorkspaceLeaf | null;
     this.leaf = app.workspace.getLeaf("tab");
     this.hideTransientTab();
     if (previouslyActive && previouslyActive !== this.leaf) {
-      try {
-        (app.workspace as any).setActiveLeaf?.(previouslyActive, { focus: true });
-      } catch (e) {}
+      const restore = () => {
+        try {
+          const stillOurs = (app.workspace as any).activeLeaf === this.leaf;
+          if (stillOurs) {
+            (app.workspace as any).setActiveLeaf?.(previouslyActive, { focus: true });
+          }
+        } catch (e) {}
+      };
+      restore();
+      queueMicrotask(restore);
+      requestAnimationFrame(restore);
+      // Belt-and-suspenders: also revert during a short window if Obsidian
+      // schedules the activation later than a single frame (varies by
+      // vault size + workspace complexity).
+      setTimeout(restore, 32);
+      setTimeout(restore, 128);
     }
     this.setupLeafPromise = this.setupLeaf(timeToRemoveLeaf);
     const content = (this.leaf.view as any).containerEl.find(".view-content") as HTMLElement;

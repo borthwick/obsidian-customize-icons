@@ -213,7 +213,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       });
     }
 
-    new Notice("Customize Icons v1.7.14 loaded (crisp ring + banner no focus steal)");
+    new Notice("Customize Icons v1.7.15 loaded (banner focus restore hardened)");
   }
 
   onunload(): void {

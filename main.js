@@ -1284,15 +1284,25 @@ function escapeXml(s) {
 // src/graph-banner/banner-view.ts
 var _GraphBannerView = class {
   constructor(app, timeToRemoveLeaf) {
-    var _a, _b;
     const previouslyActive = app.workspace.activeLeaf;
     this.leaf = app.workspace.getLeaf("tab");
     this.hideTransientTab();
     if (previouslyActive && previouslyActive !== this.leaf) {
-      try {
-        (_b = (_a = app.workspace).setActiveLeaf) == null ? void 0 : _b.call(_a, previouslyActive, { focus: true });
-      } catch (e) {
-      }
+      const restore = () => {
+        var _a, _b;
+        try {
+          const stillOurs = app.workspace.activeLeaf === this.leaf;
+          if (stillOurs) {
+            (_b = (_a = app.workspace).setActiveLeaf) == null ? void 0 : _b.call(_a, previouslyActive, { focus: true });
+          }
+        } catch (e) {
+        }
+      };
+      restore();
+      queueMicrotask(restore);
+      requestAnimationFrame(restore);
+      setTimeout(restore, 32);
+      setTimeout(restore, 128);
     }
     this.setupLeafPromise = this.setupLeaf(timeToRemoveLeaf);
     const content = this.leaf.view.containerEl.find(".view-content");
@@ -2687,7 +2697,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
         }
       });
     }
-    new import_obsidian5.Notice("Customize Icons v1.7.14 loaded (crisp ring + banner no focus steal)");
+    new import_obsidian5.Notice("Customize Icons v1.7.15 loaded (banner focus restore hardened)");
   }
   onunload() {
     if (this.errorLogger) {
