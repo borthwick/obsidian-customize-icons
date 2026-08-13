@@ -213,7 +213,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       });
     }
 
-    new Notice("Customize Icons v1.7.13 loaded (Vy icons baked in + rebuild fallback)");
+    new Notice("Customize Icons v1.7.14 loaded (crisp ring + banner no focus steal)");
   }
 
   onunload(): void {
@@ -281,7 +281,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       return {
         color: this.settings.qualityHighColor,
         cssClass: "ci-quality-high ci-both-high",
-        ringColor: this.settings.connectivityColor,
+        ringColor: this.settings.bothHighRingColor,
       };
     }
     if (qualityHigh) {

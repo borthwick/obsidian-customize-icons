@@ -14,8 +14,21 @@ export class GraphBannerView {
   setupLeafPromise: Promise<void>;
 
   constructor(app: App, timeToRemoveLeaf: number) {
+    // Snapshot the active leaf BEFORE creating our transient tab. Recent
+    // Obsidian versions make the leaf returned by getLeaf("tab") active,
+    // which hides the user's markdown pane and promotes the next tab to
+    // the viewport — the "click placeholder → jumps to next tab, come
+    // back to an empty banner box" bug. We create the leaf, then
+    // immediately restore focus so the transient tab stays invisible
+    // in both the tab bar (CSS hide) and the workspace's activeLeaf.
+    const previouslyActive = (app.workspace as any).activeLeaf as WorkspaceLeaf | null;
     this.leaf = app.workspace.getLeaf("tab");
     this.hideTransientTab();
+    if (previouslyActive && previouslyActive !== this.leaf) {
+      try {
+        (app.workspace as any).setActiveLeaf?.(previouslyActive, { focus: true });
+      } catch (e) {}
+    }
     this.setupLeafPromise = this.setupLeaf(timeToRemoveLeaf);
     const content = (this.leaf.view as any).containerEl.find(".view-content") as HTMLElement;
     this.node = content;

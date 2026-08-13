@@ -3,7 +3,7 @@
 import { MarkdownPostProcessorContext } from "obsidian";
 import type CustomizeIconsPlugin from "../main";
 import { ConnectivitySurface, FolderIcon } from "../types";
-import { createEmojiElement, createIconElement } from "../icons/render";
+import { applyBothHighRing, createEmojiElement, createIconElement } from "../icons/render";
 import { loadSvg, parseIconId, resolveIconForPath } from "../icons/index";
 
 export function processReadingModeLinks(
@@ -66,8 +66,9 @@ export async function insertLinkIcon(
     );
     if (!svg) return;
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    const iconEl = createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null);
+    const iconEl = createIconElement(svg, color, qualityInfo.cssClass);
     span.appendChild(iconEl);
+    applyBothHighRing(span, qualityInfo.ringColor || null);
   }
 
   link.insertBefore(span, link.firstChild);

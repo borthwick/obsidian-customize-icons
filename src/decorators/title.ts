@@ -2,7 +2,7 @@
 
 import { WorkspaceLeaf } from "obsidian";
 import type CustomizeIconsPlugin from "../main";
-import { createEmojiElement, createIconElement } from "../icons/render";
+import { applyBothHighRing, createEmojiElement, createIconElement } from "../icons/render";
 import { loadSvg, parseIconId, resolveIconForPath } from "../icons/index";
 
 export async function addTitleIcon(
@@ -42,9 +42,8 @@ export async function addTitleIcon(
     if (!svg) return;
     const qualityInfo = plugin.getQualityColorInfo(view.file.path, "title");
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    span.appendChild(
-      createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
-    );
+    span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+    applyBothHighRing(span, qualityInfo.ringColor || null);
   }
 
   titleContainer.parentElement.insertBefore(span, titleContainer);

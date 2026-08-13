@@ -1,7 +1,7 @@
 // Tab-header icon injection.
 
 import type CustomizeIconsPlugin from "../main";
-import { createEmojiElement, createIconElement } from "../icons/render";
+import { applyBothHighRing, createEmojiElement, createIconElement } from "../icons/render";
 import { loadSvg, parseIconId, resolveIconForPath } from "../icons/index";
 
 export async function decorateOpenTabs(plugin: CustomizeIconsPlugin): Promise<void> {
@@ -43,9 +43,8 @@ export async function decorateOpenTabs(plugin: CustomizeIconsPlugin): Promise<vo
       if (!svg) continue;
       const qualityInfo = plugin.getQualityColorInfo(file.path, "tabs");
       const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-      span.appendChild(
-        createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
-      );
+      span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+      applyBothHighRing(span, qualityInfo.ringColor || null);
     }
 
     titleEl.parentElement.insertBefore(span, titleEl);

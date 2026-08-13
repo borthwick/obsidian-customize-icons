@@ -47,9 +47,8 @@ export class LinkIconWidget extends WidgetType {
         }
       }
       if (this.resolution.ringColor) {
-        const r = this.resolution.ringColor;
-        (svg as SVGElement).style.filter =
-          `drop-shadow(0 0 0.75px ${r}) drop-shadow(0 0 0.75px ${r})`;
+        svg.classList.add("ci-both-high");
+        (svg as SVGElement).style.setProperty("--ci-ring-color", this.resolution.ringColor);
       }
       (svg as SVGElement).style.pointerEvents = "none";
     }

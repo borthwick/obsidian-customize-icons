@@ -2,7 +2,7 @@
 
 import { TFile, TFolder } from "obsidian";
 import type CustomizeIconsPlugin from "../main";
-import { createEmojiElement, createIconElement } from "../icons/render";
+import { applyBothHighRing, createEmojiElement, createIconElement } from "../icons/render";
 import { loadSvg, parseIconId, resolveIconForPath } from "../icons/index";
 
 export async function decorateFileExplorer(plugin: CustomizeIconsPlugin): Promise<void> {
@@ -74,9 +74,8 @@ export async function decorateFileExplorer(plugin: CustomizeIconsPlugin): Promis
             ? plugin.getQualityColorInfo(item.file.path, "fileExplorer")
             : { color: null, cssClass: null, ringColor: null };
         const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-        span.appendChild(
-          createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null),
-        );
+        span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+        applyBothHighRing(span, qualityInfo.ringColor || null);
       }
 
       titleRowEl.insertBefore(span, titleEl);

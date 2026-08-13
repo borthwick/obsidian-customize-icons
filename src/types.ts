@@ -42,6 +42,10 @@ export interface CustomizeIconsSettings {
   connectivityThreshold: number;
   connectivityPenaltyFolders: string;
   connectivityToggles: ConnectivitySurfaceToggles;
+  // Ring color drawn around a quality-high icon when the file ALSO scores
+  // high on connectivity. Deliberately softer than connectivityColor so the
+  // secondary signal doesn't overpower the primary green fill.
+  bothHighRingColor: string;
   folderIcons: Record<string, FolderIcon>;
   iconPacksPath: string;
   graphBanner: GraphBannerSubsettings;
@@ -128,6 +132,7 @@ export const DEFAULT_SETTINGS: CustomizeIconsSettings = {
   connectivityThreshold: 10,
   connectivityPenaltyFolders: "2. Day Planners, Templates, Week",
   connectivityToggles: DEFAULT_CONNECTIVITY_TOGGLES,
+  bothHighRingColor: "#7A46E7",
   folderIcons: {},
   iconPacksPath: ".obsidian/icons",
   graphBanner: DEFAULT_GRAPH_BANNER,

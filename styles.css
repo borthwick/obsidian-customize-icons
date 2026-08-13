@@ -116,6 +116,24 @@ a.internal-link:has(> .customize-icons-link-icon):first-line {
   /* color set via inline style */
 }
 
+/* "High on both" ring — quality-high fill + a crisp circle in the
+   connectivity color, drawn on the SVG itself via box-shadow so it stays
+   square (SVG is always sized 12–24px). --ci-ring-color is set inline
+   from settings.connectivityColor.
+
+   The extra shadow offset (0 0 0 1.5px on the outer surface icons)
+   sits just outside the icon glyph. Margin keeps the ring from
+   colliding with neighboring text. */
+.customize-icons-explorer-icon svg.ci-both-high,
+.customize-icons-tab-icon svg.ci-both-high,
+.customize-icons-link-icon svg.ci-both-high,
+.customize-icons-title-icon svg.ci-both-high {
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ci-ring-color, #7A46E7);
+  overflow: visible;
+  margin: 1px;
+}
+
 /* Settings - icon picker */
 .ci-icon-picker-container {
   max-height: 300px;

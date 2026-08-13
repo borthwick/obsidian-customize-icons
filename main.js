@@ -477,6 +477,7 @@ var DEFAULT_SETTINGS = {
   connectivityThreshold: 10,
   connectivityPenaltyFolders: "2. Day Planners, Templates, Week",
   connectivityToggles: DEFAULT_CONNECTIVITY_TOGGLES,
+  bothHighRingColor: "#7A46E7",
   folderIcons: {},
   iconPacksPath: ".obsidian/icons",
   graphBanner: DEFAULT_GRAPH_BANNER
@@ -514,7 +515,7 @@ function isEmoji(str) {
     return false;
   return str.length <= 4 && !/^[A-Z][a-z]/.test(str);
 }
-function createIconElement(svgString, color, qualityClass, ringColor = null) {
+function createIconElement(svgString, color, qualityClass, _ringColor = null) {
   const span = document.createElement("span");
   if (svgString) {
     span.innerHTML = svgString;
@@ -528,12 +529,18 @@ function createIconElement(svgString, color, qualityClass, ringColor = null) {
         for (const cls of qualityClass.split(/\s+/).filter(Boolean))
           svg.classList.add(cls);
       }
-      if (ringColor) {
-        svg.style.filter = `drop-shadow(0 0 0.75px ${ringColor}) drop-shadow(0 0 0.75px ${ringColor})`;
-      }
     }
   }
   return span;
+}
+function applyBothHighRing(wrapper, ringColor) {
+  if (!ringColor)
+    return;
+  const svg = wrapper.querySelector("svg");
+  if (!svg)
+    return;
+  svg.classList.add("ci-both-high");
+  svg.style.setProperty("--ci-ring-color", ringColor);
 }
 function createEmojiElement(emoji) {
   const span = document.createElement("span");
@@ -771,8 +778,9 @@ async function insertLinkIcon(plugin, link, filePath, iconConfig, surface = "lin
     if (!svg)
       return;
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    const iconEl = createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null);
+    const iconEl = createIconElement(svg, color, qualityInfo.cssClass);
     span.appendChild(iconEl);
+    applyBothHighRing(span, qualityInfo.ringColor || null);
   }
   link.insertBefore(span, link.firstChild);
   link.insertBefore(document.createTextNode("\u2060"), span.nextSibling);
@@ -835,9 +843,8 @@ async function decorateFileExplorer(plugin) {
           continue;
         const qualityInfo = item.file instanceof import_obsidian2.TFile ? plugin.getQualityColorInfo(item.file.path, "fileExplorer") : { color: null, cssClass: null, ringColor: null };
         const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-        span.appendChild(
-          createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null)
-        );
+        span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+        applyBothHighRing(span, qualityInfo.ringColor || null);
       }
       titleRowEl.insertBefore(span, titleEl);
     }
@@ -884,9 +891,8 @@ async function decorateOpenTabs(plugin) {
         continue;
       const qualityInfo = plugin.getQualityColorInfo(file.path, "tabs");
       const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-      span.appendChild(
-        createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null)
-      );
+      span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+      applyBothHighRing(span, qualityInfo.ringColor || null);
     }
     titleEl.parentElement.insertBefore(span, titleEl);
   }
@@ -926,9 +932,8 @@ async function addTitleIcon(plugin, leaf) {
       return;
     const qualityInfo = plugin.getQualityColorInfo(view.file.path, "title");
     const color = qualityInfo.color || iconConfig.color || plugin.settings.defaultIconColor;
-    span.appendChild(
-      createIconElement(svg, color, qualityInfo.cssClass, qualityInfo.ringColor || null)
-    );
+    span.appendChild(createIconElement(svg, color, qualityInfo.cssClass));
+    applyBothHighRing(span, qualityInfo.ringColor || null);
   }
   titleContainer.parentElement.insertBefore(span, titleContainer);
 }
@@ -1078,8 +1083,8 @@ var LinkIconWidget = class extends import_view.WidgetType {
         }
       }
       if (this.resolution.ringColor) {
-        const r = this.resolution.ringColor;
-        svg.style.filter = `drop-shadow(0 0 0.75px ${r}) drop-shadow(0 0 0.75px ${r})`;
+        svg.classList.add("ci-both-high");
+        svg.style.setProperty("--ci-ring-color", this.resolution.ringColor);
       }
       svg.style.pointerEvents = "none";
     }
@@ -1279,8 +1284,16 @@ function escapeXml(s) {
 // src/graph-banner/banner-view.ts
 var _GraphBannerView = class {
   constructor(app, timeToRemoveLeaf) {
+    var _a, _b;
+    const previouslyActive = app.workspace.activeLeaf;
     this.leaf = app.workspace.getLeaf("tab");
     this.hideTransientTab();
+    if (previouslyActive && previouslyActive !== this.leaf) {
+      try {
+        (_b = (_a = app.workspace).setActiveLeaf) == null ? void 0 : _b.call(_a, previouslyActive, { focus: true });
+      } catch (e) {
+      }
+    }
     this.setupLeafPromise = this.setupLeaf(timeToRemoveLeaf);
     const content = this.leaf.view.containerEl.find(".view-content");
     this.node = content;
@@ -2674,7 +2687,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
         }
       });
     }
-    new import_obsidian5.Notice("Customize Icons v1.7.13 loaded (Vy icons baked in + rebuild fallback)");
+    new import_obsidian5.Notice("Customize Icons v1.7.14 loaded (crisp ring + banner no focus steal)");
   }
   onunload() {
     if (this.errorLogger) {
@@ -2718,7 +2731,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
       return {
         color: this.settings.qualityHighColor,
         cssClass: "ci-quality-high ci-both-high",
-        ringColor: this.settings.connectivityColor
+        ringColor: this.settings.bothHighRingColor
       };
     }
     if (qualityHigh) {
