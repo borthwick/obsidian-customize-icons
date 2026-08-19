@@ -1,6 +1,6 @@
 {
   "name": "customize-icons",
-  "version": "1.7.0",
+  "version": "1.7.16",
   "description": "Folder-based icon assignment with quality score, connectivity coloring, and graph-banner display",
   "main": "main.js",
   "scripts": {
