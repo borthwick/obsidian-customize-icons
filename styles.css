@@ -273,6 +273,14 @@ a.internal-link:has(> .customize-icons-link-icon):first-line {
   display: inline-block;
 }
 
+/* Final safety net for the LP-widget + reading-mode dedupe: if BOTH paths
+   somehow landed an icon on the same wikilink (e.g. post-processor racing
+   the widget), hide the inner one. The widget-inserted span is a sibling
+   right before the <a>, so the reading-mode icon sits inside .internal-link. */
+.customize-icons-link-icon.ci-live-preview-widget + a.internal-link > .customize-icons-link-icon {
+  display: none !important;
+}
+
 /* Graph banner (ported from ras0q/obsidian-graph-banner v2.3.3) */
 :root {
   --banner-margin-bottom: 16px;

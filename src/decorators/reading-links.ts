@@ -12,9 +12,21 @@ export function processReadingModeLinks(
   ctx: MarkdownPostProcessorContext,
 ): void {
   if (!plugin.settings.showInLinks) return;
+  const lpWidgetActive = plugin.settings.enableLivePreviewLinkIcons;
   const links = el.querySelectorAll("a.internal-link");
   for (const link of Array.from(links)) {
     if (link.querySelector(".customize-icons-link-icon")) continue;
+
+    // When the CM6 widget path is on, callouts / embeds / other inline
+    // renders inside a Live Preview pane fire this post-processor AND
+    // are already decorated by the widget — resulting in two icons on
+    // the same wikilink. Skip if a widget span already sits immediately
+    // before this <a>, which is exactly the LP widget's position
+    // (Decoration.widget side:-1 renders as the previous sibling).
+    if (lpWidgetActive) {
+      const prev = (link as HTMLElement).previousElementSibling;
+      if (prev && prev.classList.contains("ci-live-preview-widget")) continue;
+    }
 
     const href = link.getAttribute("data-href");
     if (!href) continue;

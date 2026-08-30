@@ -213,7 +213,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       });
     }
 
-    new Notice("Customize Icons v1.7.15 loaded (banner focus restore hardened)");
+    new Notice("Customize Icons v1.7.17 loaded (LP+RM wikilink dedupe)");
   }
 
   onunload(): void {

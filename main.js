@@ -736,10 +736,16 @@ function computeFileConnectivity(file, resolved, inbound, penaltyFolders) {
 function processReadingModeLinks(plugin, el, ctx) {
   if (!plugin.settings.showInLinks)
     return;
+  const lpWidgetActive = plugin.settings.enableLivePreviewLinkIcons;
   const links = el.querySelectorAll("a.internal-link");
   for (const link of Array.from(links)) {
     if (link.querySelector(".customize-icons-link-icon"))
       continue;
+    if (lpWidgetActive) {
+      const prev = link.previousElementSibling;
+      if (prev && prev.classList.contains("ci-live-preview-widget"))
+        continue;
+    }
     const href = link.getAttribute("data-href");
     if (!href)
       continue;
@@ -2697,7 +2703,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
         }
       });
     }
-    new import_obsidian5.Notice("Customize Icons v1.7.15 loaded (banner focus restore hardened)");
+    new import_obsidian5.Notice("Customize Icons v1.7.17 loaded (LP+RM wikilink dedupe)");
   }
   onunload() {
     if (this.errorLogger) {
