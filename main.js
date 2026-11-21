@@ -2779,12 +2779,22 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
     if (this._explorerTimer)
       clearTimeout(this._explorerTimer);
     this._explorerTimer = setTimeout(() => {
+      if (this._decorating) {
+        this.debouncedDecorate();
+        return;
+      }
+      this._decorating = true;
       this.decorateFileExplorer();
       this.decorateOpenTabs();
-      document.querySelectorAll(".internal-link[data-ci-processed]").forEach((el) => el.removeAttribute("data-ci-processed"));
-      document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach((el) => el.remove());
-      this.decorateBases();
-    }, 500);
+      requestAnimationFrame(() => {
+        document.querySelectorAll(".internal-link[data-ci-processed]").forEach((el) => el.removeAttribute("data-ci-processed"));
+        requestAnimationFrame(() => {
+          document.querySelectorAll(".bases-view .customize-icons-link-icon").forEach((el) => el.remove());
+          this.decorateBases();
+          this._decorating = false;
+        });
+      });
+    }, 800);
   }
   async loadBundledIcons() {
     const bundlePath = ".obsidian/plugins/customize-icons/icons-bundle.json";

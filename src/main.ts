@@ -318,20 +318,44 @@ export default class CustomizeIconsPlugin extends Plugin {
   }
 
   debouncedDecorate(): void {
+    // Coalesce bursts. metadataCache "changed" fires once per file, so an
+    // Obsidian Sync burst (dozens of files landing) used to queue dozens of
+    // full-DOM sweeps; the 500ms window was too tight to absorb a multi-second
+    // sync, and each fired pass did explorer + tabs + a document-wide
+    // querySelectorAll link sweep + Bases re-inject synchronously in one frame
+    // — the 100-176ms setTimeout/forced-reflow violations that blanked the
+    // window. Fix: longer window, skip while a pass is already in flight, and
+    // split the heavy work across animation frames so no single frame stalls.
     if (this._explorerTimer) clearTimeout(this._explorerTimer);
     this._explorerTimer = setTimeout(() => {
+      if (this._decorating) {
+        // A pass is already running/queued; re-arm instead of stacking a
+        // second synchronous sweep on top of it.
+        this.debouncedDecorate();
+        return;
+      }
+      this._decorating = true;
+
+      // Frame 1: explorer + tabs (cheap, scoped to their own containers).
       this.decorateFileExplorer();
       this.decorateOpenTabs();
-      // Clear ci-processed markers so stale links pick up the new icon/color
-      document
-        .querySelectorAll(".internal-link[data-ci-processed]")
-        .forEach((el) => el.removeAttribute("data-ci-processed"));
-      // Remove and re-inject icons inside Bases
-      document
-        .querySelectorAll(".bases-view .customize-icons-link-icon")
-        .forEach((el) => el.remove());
-      this.decorateBases();
-    }, 500);
+
+      // Frame 2: clear stale link markers so they re-pick icons/colors.
+      requestAnimationFrame(() => {
+        document
+          .querySelectorAll(".internal-link[data-ci-processed]")
+          .forEach((el) => el.removeAttribute("data-ci-processed"));
+
+        // Frame 3: Bases teardown + re-inject (the heaviest step).
+        requestAnimationFrame(() => {
+          document
+            .querySelectorAll(".bases-view .customize-icons-link-icon")
+            .forEach((el) => el.remove());
+          this.decorateBases();
+          this._decorating = false;
+        });
+      });
+    }, 800);
   }
 
   async loadBundledIcons(): Promise<BundledIcons> {
