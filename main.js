@@ -2703,7 +2703,7 @@ var CustomizeIconsPlugin = class extends import_obsidian5.Plugin {
         }
       });
     }
-    new import_obsidian5.Notice("Customize Icons v1.7.18 loaded (freeze fix: debounce+raf)");
+    new import_obsidian5.Notice("Customize Icons v1.7.19 loaded (freeze fix: debounce+raf)");
   }
   onunload() {
     if (this.errorLogger) {
