@@ -213,7 +213,7 @@ export default class CustomizeIconsPlugin extends Plugin {
       });
     }
 
-    new Notice("Customize Icons v1.7.17 loaded (LP+RM wikilink dedupe)");
+    new Notice("Customize Icons v1.7.18 loaded (freeze fix: debounce+raf)");
   }
 
   onunload(): void {
